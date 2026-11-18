@@ -54,13 +54,16 @@ zeigt ein Live-Leaderboard plus eigene WPM/Genauigkeit. Falsche Tasten blockiere
 
 - **Stack:** TypeScript end-to-end. Server: Node.js + a WebSocket library. Frontend: TS SPA with vanilla DOM (no heavy framework). (Q5)
 - **Authoritative server (ADR 0001):** The server receives every keystroke and computes all game state; the client renders. No client-side scoring. Consequence: host must stay; player count bound to host machine; no internet needed.
+- **Host always plays (rule, not description):** The host's browser session joins the lobby on connect (auto-join, default nickname "Host"); the host is always a player. Consequence: host leaving always ends the game (story 24), and the host can always set the round duration.
 - **Single test seam – the game engine:** All game rules live in one pure, deterministic, event-driven module (the engine) on the server. It is decoupled from the WebSocket transport and the frontend. The engine consumes a stream of events (join, start, keystroke, disconnect) plus round config, maintains per-player state (position, errors, WPM, accuracy, Wertung), and emits state snapshots (leaderboard, round phase, time remaining). The WebSocket layer and the browser SPA are thin adapters around it.
 - **Round model (ADR 0002):** Fixed duration (60s default; host-selectable 30/60/120s). All players type the same text; highest Wertung wins. UI needs a timer, not finish-detection.
-- **Wertung:** A per-player number combining Tempo (e.g. WPM of correctly typed characters) and Tasten-Genauigkeit (correct / total keypresses). Exact formula to be finalized in tickets; must reward technique (slow+correct can beat fast+inaccurate).
+- **Empty round / empty results (added after model verification):** If the last player in a round disconnects, the round still runs to its fixed end; the resulting empty results end the game (GameOver). Without this rule the game would deadlock (back-to-lobby requires at least one player).
+- Defensive note: with the host always playing, empty results cannot occur (the host is always in the round; host leaving ends the game immediately); the rule is kept as a safety net.
+- **Wertung:** `score = accuracy² × (correct chars / duration) × 100`, integer arithmetic, 0 if no keypresses (i.e. `100·correct³ / (total²·durationSec)`). Rewards technique: slow+correct beats fast+inaccurate (60s example: 10 correct/0 errors → 16 beats 12 correct/6 errors → 8; even 3× volume at 50% accuracy → 12 loses to the clean+slow player).
 - **Blocking errors (ADR 0003):** A wrong keypress does not advance the cursor; the spot is marked red; the correct key must be pressed to continue; every wrong press counts as an error.
 - **Finger mapping:** A QWERTZ home-row finger map (key → finger) drives the Finger-Hinweis. Pure function, used by both the engine (for any server-side needs) and the frontend diagram. Not part of the Wertung.
-- **Text source:** A curated, bundled list of common German words/sentences on QWERTZ; one is chosen at random per round; length calibrated to the round duration (~60–80 chars for 60s).
-- **Start-Recht rotation:** Earliest joiner holds the first Start-Recht; it rotates to the next player after each round. No countdown. A round may start with 1+ players.
+- **Text source:** A curated, bundled list of common German words/sentences on QWERTZ; one is chosen at random per round; length calibrated to the round duration, scaling linearly (~1–1.3 chars/sec): 30s → 30–40 chars, 60s → 60–80 chars, 120s → 120–160 chars.
+- **Start-Recht rotation:** Earliest joiner holds the first Start-Recht; it rotates to the next player after each round. If the holder leaves the lobby, the next player in the queue holds it. No countdown. A round may start with 1+ players.
 - **Discovery:** Host displays the LAN URL on screen. No QR code.
 - **No persistence:** No accounts, no saved highscores, no data written to disk beyond the bundled content.
 
@@ -88,5 +91,5 @@ zeigt ein Live-Leaderboard plus eigene WPM/Genauigkeit. Falsche Tasten blockiere
 
 - German-speaking users; UI text in German.
 - Designed for 2–4 players, supports up to 8.
-- The host is also a player (connects via browser like everyone else).
+- The host is always a player (auto-joins on connect, default nickname "Host"); the host's session is the server — if it ends, the game ends for everyone.
 - Finger correctness is intentionally NOT scored — a standard keyboard reports the key, not the finger (unmeasurable). The Finger-Hinweis is a pure visual learning aid.
