@@ -123,12 +123,17 @@ export function renderRound(
   const stats = el(
     "div",
     { class: "stats" },
-    el("div", { class: "stat" }, el("span", { class: "stat-value" }, String(wpm)), " WPM"),
+    el(
+      "div",
+      { class: "stat" },
+      el("span", { class: "stat-value" }, String(wpm)),
+      el("span", { class: "stat-label" }, " WPM"),
+    ),
     el(
       "div",
       { class: "stat" },
       el("span", { class: "stat-value" }, `${accuracy}%`),
-      " Trefferquote",
+      el("span", { class: "stat-label" }, " Trefferquote"),
     ),
   );
 
