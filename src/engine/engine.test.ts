@@ -444,11 +444,11 @@ describe("disconnect", () => {
     expect(state.phase).toBe("round"); // round continues
     advance(60);
     const end = run(state, [{ type: "tick" }], clock);
-    expect(end.state.phase).toBe("results"); // host is always in the round → results, not GameOver
+    expect(end.state.phase).toBe("results"); // host is always in the round → results
     expect(end.state.players.map((p) => p.id)).toEqual(["host"]);
   });
 
-  it("ends in GameOver if the round finishes with empty results (defensive)", () => {
+  it("transitions to results if the round finishes with empty players (defensive)", () => {
     const { clock, advance } = makeClock(0);
     // Unreachable through normal play (host always plays); tested as a pure function.
     const empty: GameState = {
@@ -462,12 +462,12 @@ describe("disconnect", () => {
     };
     advance(60);
     const end = run(empty, [{ type: "tick" }], clock);
-    expect(end.state.phase).toBe("gameover");
+    expect(end.state.phase).toBe("results");
     expect(end.state.winnerId).toBeNull();
-    expect(last(end.snapshots).phase).toBe("gameover");
+    expect(last(end.snapshots).phase).toBe("results");
   });
 
-  it("ends the game immediately when the host leaves", () => {
+  it("removes the host when they leave during a round; the round continues", () => {
     const { clock } = makeClock(0);
     const { state } = run(
       createGame("host"),
@@ -478,7 +478,7 @@ describe("disconnect", () => {
       ],
       clock,
     );
-    expect(state.phase).toBe("gameover");
+    expect(state.phase).toBe("round");
     expect(state.players).toHaveLength(1);
   });
 
@@ -488,7 +488,8 @@ describe("disconnect", () => {
       { type: "join", playerId: "p2", nickname: "Bob" },
       { type: "disconnect", playerId: "host" }, // host is first in queue → p1 inherits
     ]);
-    expect(state.phase).toBe("gameover"); // host leaving ends the game
+    expect(state.phase).toBe("lobby");
+    expect(state.startRight).toBe("p1");
   });
 
   it("hands over the Start-Recht to the head of the queue when a rotated holder leaves the lobby", () => {
@@ -576,9 +577,9 @@ describe("disconnect", () => {
     expect(state.players).toHaveLength(1);
   });
 
-  it("ends in GameOver if the last remaining player leaves in the results (defensive)", () => {
+  it("keeps results phase if the last remaining player leaves in the results (defensive)", () => {
     const { clock } = makeClock(0);
-    // Unreachable through normal play (host always plays); tested as a pure function.
+    // Unreachable through normal play; tested as a pure function.
     const lonely: GameState = {
       ...createGame("host"),
       phase: "results",
@@ -590,9 +591,9 @@ describe("disconnect", () => {
       winnerId: "p1",
     };
     const after = run(lonely, [{ type: "disconnect", playerId: "p1" }], clock);
-    expect(after.state.phase).toBe("gameover");
+    expect(after.state.phase).toBe("results");
     expect(after.state.winnerId).toBeNull();
-    expect(last(after.snapshots).phase).toBe("gameover");
+    expect(last(after.snapshots).phase).toBe("results");
   });
 });
 
@@ -657,7 +658,7 @@ describe("back to lobby and Start-Recht rotation", () => {
     const results = run(state, [{ type: "tick" }], clock);
     expect(results.state.startRight).toBe("host");
     const after = run(results.state, [{ type: "disconnect", playerId: "host" }], clock);
-    expect(after.state.phase).toBe("gameover"); // host leaving ends the game
+    expect(after.state.phase).toBe("results");
   });
 
   it("rejects backToLobby outside the results phase", () => {

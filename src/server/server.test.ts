@@ -166,7 +166,7 @@ describe("tick", () => {
 });
 
 describe("disconnect", () => {
-  it("ends the game for everyone when the host leaves", () => {
+  it("removes the host from the game; the phase stays unchanged", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     const p2 = new FakeConn("p2");
@@ -174,7 +174,7 @@ describe("disconnect", () => {
     server.connect(p2);
     send(p2, server, { type: "join", nickname: "Bob" });
     server.disconnect(host);
-    expect(p2.last().phase).toBe("gameover");
+    expect(p2.last().phase).toBe("lobby");
     expect(host.last().phase).toBe("lobby");
   });
 

@@ -145,14 +145,6 @@ export function renderResults(
   );
 }
 
-export function renderGameOver(app: HTMLElement, snap: Snapshot, myId: string | null): void {
-  app.replaceChildren(
-    el("h1", {}, "Blind-Tippen"),
-    el("h2", {}, "Das Spiel ist vorbei"),
-    ranking(snap, myId),
-  );
-}
-
 function ranking(snap: Snapshot, myId: string | null): HTMLElement {
   return el(
     "ol",

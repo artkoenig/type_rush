@@ -104,15 +104,15 @@ module blindTyping_test {
         state.roundStarters == List(1, 1),
       })
 
-  // Host verlässt -> GameOver für alle (auch mitten in der Runde);
-  // der Host wird entfernt, Nicht-Host-Spieler bleibt in der Liste.
-  run hostLeaveEndsGameTest =
+  // Host verlässt -> wird aus Spielern + Queue entfernt, Phase bleibt.
+  // Nicht-Host-Spieler bleibt in der Liste, Runde läuft weiter.
+  run hostLeaveRemovesTest =
     init
       .then(join(2, "ben"))
       .then(startRound(1, List("a", "b", "c")))
       .then(disconnect(1))
       .expect(and {
-        state.phase == GameOver,
+        state.phase == Round,
         state.players.keys() == Set(2),
       })
 
@@ -152,10 +152,4 @@ module blindTyping_test {
       .then(join(2, "ben"))
       .then(setDuration(1, 30))
       .expect(state.roundDuration == 30)
-
-  // `emptyGameOver` (leere Results -> GameOver) ist mit „Host spielt immer"
-  // unerreichbar: Der Host verbleibt immer in players (sein Disconnect
-  // beendet das Spiel sofort), also kann die Queue nie leer werden.
-  // Die defensive Regel bleibt im Modell und wird über den Witness
-  // `emptyResults` (0% in der Simulation) abgedeckt.
 }

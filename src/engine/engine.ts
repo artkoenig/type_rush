@@ -4,7 +4,7 @@ import { DURATIONS } from "../content/textPool";
 /** Monotonic clock in seconds, injected by the caller (never wall-clock in tests). */
 export type Clock = () => number;
 
-export type Phase = "lobby" | "round" | "results" | "gameover";
+export type Phase = "lobby" | "round" | "results";
 
 export interface PlayerState {
   id: string;
@@ -187,12 +187,9 @@ function handleTick(state: GameState, clock: Clock): GameState | null {
   const elapsed = clock() - state.clockAtRoundStart;
   const timeRemaining = Math.max(0, state.duration - elapsed);
   if (timeRemaining > 0) return { ...state, timeRemaining };
-  // Round over: results, or GameOver if the round ended empty (defensive).
-  if (state.players.length === 0)
-    return { ...state, phase: "gameover", timeRemaining: 0, winnerId: null };
-  const winner = rankPlayers(state.players, state.duration)[0];
-  // The host always plays, so the round never ends with zero players (see guard above).
-  return { ...state, phase: "results", timeRemaining: 0, winnerId: winner.id };
+  // Round over → results.
+  const winner = state.players.length > 0 ? rankPlayers(state.players, state.duration)[0] : null;
+  return { ...state, phase: "results", timeRemaining: 0, winnerId: winner?.id ?? null };
 }
 
 function handleDisconnect(
@@ -201,24 +198,15 @@ function handleDisconnect(
 ): GameState | null {
   const player = state.players.find((p) => p.id === event.playerId);
   if (player === undefined) return null;
-  // Host leaving ends the game for everyone (ADR 0001).
-  if (player.isHost) {
-    return {
-      ...state,
-      phase: "gameover",
-      players: state.players.filter((p) => p.id !== event.playerId),
-    };
-  }
   const players = state.players.filter((p) => p.id !== event.playerId);
   if (state.phase === "lobby") {
-    // The host always plays, so at least one player remains after a non-host leaves.
-    const startRight = state.startRight === event.playerId ? players[0].id : state.startRight;
+    const startRight =
+      state.startRight === event.playerId ? (players[0]?.id ?? null) : state.startRight;
     return { ...state, players, startRight };
   }
   if (state.phase === "results") {
-    if (players.length === 0) return { ...state, phase: "gameover", players, winnerId: null };
-    const winner = rankPlayers(players, state.duration)[0];
-    return { ...state, players, winnerId: winner.id };
+    const winner = players.length > 0 ? rankPlayers(players, state.duration)[0] : null;
+    return { ...state, players, winnerId: winner?.id ?? null };
   }
   // Round: removed from round and leaderboard; the round runs to completion.
   return { ...state, players };

@@ -11,7 +11,7 @@ module blindTyping {
   const HOST_NICK: str
 
   // ---- Types ----
-  type Phase = Lobby | Round | Results | GameOver
+  type Phase = Lobby | Round | Results
 
   type PlayerState = {
     nickname: str,
@@ -101,7 +101,6 @@ module blindTyping {
   // ---- Witnesses ----
   val reachedRound: bool = state.phase == Round
   val reachedResults: bool = state.phase == Results
-  val reachedGameOver: bool = state.phase == GameOver
   val someError: bool = state.players.keys().exists(k => state.players.get(k).errors > 0)
   val someFinished: bool =
     state.phase == Round and state.players.keys().exists(k => finished(state.players.get(k), state.roundText))
@@ -194,13 +193,12 @@ module blindTyping {
     state' = applyKeystroke(state, pid, key),
   }
 
-  // Host verlässt -> GameOver für alle (terminal). Sonst: aus Spieler + Queue entfernen.
+  // Spieler verlässt: aus Spieler + Queue entfernen, Phase bleibt unverändert.
   pure def canDisconnect(s: EngineState, pid: int): bool = pid.in(s.players.keys())
   pure def applyDisconnect(s: EngineState, pid: int): EngineState = {
     val players2 = s.players.keys().filter(k => k != pid).mapBy(k => s.players.get(k))
     val queue2 = s.joinQueue.select(q => q != pid)
-    val phase2 = if (pid == HOST) GameOver else s.phase
-    {...s, players: players2, joinQueue: queue2, phase: phase2}
+    {...s, players: players2, joinQueue: queue2}
   }
   action disconnect(pid: int): bool = all {
     canDisconnect(state, pid),
@@ -219,16 +217,6 @@ module blindTyping {
     state' = applyBackToLobby(state),
   }
 
-  // Leere Results -> GameOver (defensive Spec-Regel): backToLobby braucht
-  // >= 1 Spieler in der Queue. Mit „Host spielt immer" unerreichbar
-  // (Host verbleibt in players; Host-Disconnect -> GameOver) — Sicherheitsnetz.
-  pure def canEmptyGameOver(s: EngineState): bool =
-    s.phase == Results and s.joinQueue.length() == 0
-  pure def applyEmptyGameOver(s: EngineState): EngineState = {...s, phase: GameOver}
-  action emptyGameOver = all {
-    canEmptyGameOver(state),
-    state' = applyEmptyGameOver(state),
-  }
 
   // ---- Init ----
   // Host spielt immer (Spec-Regel): auto-join bei Verbindung.
@@ -259,7 +247,6 @@ module blindTyping {
       keystroke(pid, key),
       disconnect(pid),
       backToLobby,
-      emptyGameOver,
     }
   }
 }

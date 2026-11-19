@@ -2,7 +2,6 @@ import type { Snapshot } from "../engine/engine.js";
 import type { Duration } from "../content/textPool.js";
 import {
   renderDisconnected,
-  renderGameOver,
   renderLobby,
   renderResults,
   renderRound,
@@ -89,9 +88,6 @@ function handleSnapshot(snap: Snapshot): void {
     }
     case "results":
       renderResults(app, snap, myId, actions);
-      break;
-    case "gameover":
-      renderGameOver(app, snap, myId);
       break;
   }
 }
