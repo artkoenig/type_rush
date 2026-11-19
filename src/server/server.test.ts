@@ -34,11 +34,21 @@ describe("host connection", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
-    expect(host.sent).toHaveLength(1);
+    expect(host.sent).toHaveLength(2);
     const snap = host.last();
     expect(snap.phase).toBe("lobby");
     expect(snap.players).toHaveLength(1);
     expect(snap.players[0]).toMatchObject({ id: "h", nickname: "Host", isHost: true });
+  });
+
+  it("greets every new connection with a hello message", () => {
+    const { server } = setup();
+    const host = new FakeConn("h");
+    server.connect(host);
+    expect(JSON.parse(host.sent[0])).toEqual({ type: "hello", playerId: "h", isHost: true });
+    const p2 = new FakeConn("p2");
+    server.connect(p2);
+    expect(JSON.parse(p2.sent[0])).toEqual({ type: "hello", playerId: "p2", isHost: false });
   });
 
   it("sends the current state to each later connection", () => {
@@ -47,7 +57,7 @@ describe("host connection", () => {
     server.connect(host);
     const p2 = new FakeConn("p2");
     server.connect(p2);
-    expect(p2.sent).toHaveLength(1);
+    expect(p2.sent).toHaveLength(2);
     expect(p2.last().players.map((p) => p.id)).toEqual(["h"]);
   });
 });
@@ -72,7 +82,7 @@ describe("join", () => {
     server.message(host, JSON.stringify(42));
     server.message(host, JSON.stringify({ type: "nope" }));
     server.message(host, JSON.stringify({ type: "join" }));
-    expect(host.sent).toHaveLength(1);
+    expect(host.sent).toHaveLength(2);
   });
 });
 
@@ -100,7 +110,7 @@ describe("start", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(p2, server, { type: "start" });
     expect(host.last().phase).toBe("lobby");
-    expect(host.sent).toHaveLength(2);
+    expect(host.sent).toHaveLength(3);
   });
 });
 
@@ -189,7 +199,7 @@ describe("disconnect", () => {
     server.connect(host);
     server.connect(p3);
     server.disconnect(p3);
-    expect(host.sent).toHaveLength(1);
+    expect(host.sent).toHaveLength(2);
   });
 });
 
@@ -218,7 +228,7 @@ describe("setDuration", () => {
     const host = new FakeConn("h");
     server.connect(host);
     send(host, server, { type: "setDuration", duration: 45 });
-    expect(host.sent).toHaveLength(1);
+    expect(host.sent).toHaveLength(2);
   });
 });
 

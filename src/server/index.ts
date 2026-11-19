@@ -1,6 +1,9 @@
 import http from "node:http";
 import os from "node:os";
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { buildSync } from "esbuild";
 import { WebSocketServer, type RawData } from "ws";
 import { GameServer, type ClientConnection } from "./server.js";
 
@@ -9,9 +12,27 @@ const TICK_INTERVAL_MS = 1000;
 
 const game = new GameServer();
 
-const httpServer = http.createServer((_req, res) => {
-  res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-  res.end("blind-typing-multiplayer\n");
+const indexHtml = readFileSync(fileURLToPath(new URL("../client/index.html", import.meta.url)));
+const appJs = buildSync({
+  entryPoints: [fileURLToPath(new URL("../client/main.ts", import.meta.url))],
+  bundle: true,
+  write: false,
+  format: "iife",
+}).outputFiles[0].text;
+
+const httpServer = http.createServer((req, res) => {
+  if (req.url === "/") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(indexHtml);
+    return;
+  }
+  if (req.url === "/app.js") {
+    res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+    res.end(appJs);
+    return;
+  }
+  res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+  res.end("not found\n");
 });
 
 const wss = new WebSocketServer({ server: httpServer });
@@ -38,7 +59,7 @@ setInterval(() => game.tick(), TICK_INTERVAL_MS);
 function lanIp(): string {
   for (const ifaces of Object.values(os.networkInterfaces())) {
     for (const iface of ifaces ?? []) {
-      if (iface.family === "IPv4" && iface.internal) return iface.address;
+      if (iface.family === "IPv4" && !iface.internal) return iface.address;
     }
   }
   return "127.0.0.1";

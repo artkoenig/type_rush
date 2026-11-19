@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blind-Tippen</title>
+    <style>
+      :root {
+        --bg: #10141a;
+        --fg: #e8edf2;
+        --dim: #5a6673;
+        --accent: #4cc9f0;
+        --error: #ef476f;
+        --card: #1a212b;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        min-height: 100vh;
+      }
+      #app {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin: 0;
+      }
+      h2,
+      h3 {
+        font-size: 1.1rem;
+        margin: 0;
+        color: var(--dim);
+      }
+      .timer {
+        font-size: clamp(2rem, 8vw, 3.5rem);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+      }
+      .text {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: clamp(1.1rem, 3.2vw, 1.8rem);
+        line-height: 1.9;
+        text-align: center;
+        background: var(--card);
+        border-radius: 12px;
+        padding: 16px;
+        word-break: break-word;
+      }
+      .char.typed {
+        color: var(--dim);
+      }
+      .char.next {
+        background: var(--accent);
+        color: #08131a;
+        border-radius: 4px;
+      }
+      .char.error {
+        background: var(--error);
+        color: #1a0510;
+        border-radius: 4px;
+      }
+      .keyboard {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: center;
+      }
+      .kb-row {
+        display: flex;
+        gap: 5px;
+      }
+      .key {
+        width: clamp(22px, 7.6vw, 44px);
+        height: clamp(30px, 9vw, 52px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--card);
+        border-radius: 6px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: clamp(0.7rem, 2.4vw, 1rem);
+        color: var(--dim);
+      }
+      .key-space {
+        width: clamp(120px, 55vw, 260px);
+      }
+      .key-finger {
+        color: var(--fg);
+        background: #26303d;
+      }
+      .key-next {
+        background: var(--accent);
+        color: #08131a;
+      }
+      .hint {
+        text-align: center;
+        color: var(--dim);
+        margin: 0;
+      }
+      .bottom {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        justify-content: space-between;
+      }
+      .stats {
+        display: flex;
+        gap: 24px;
+        align-items: baseline;
+      }
+      .stat-value {
+        font-size: 1.6rem;
+        font-weight: 700;
+      }
+      .board {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 220px;
+      }
+      .board li {
+        display: flex;
+        gap: 10px;
+        background: var(--card);
+        border-radius: 8px;
+        padding: 8px 12px;
+      }
+      .board .rank {
+        width: 1.6em;
+        color: var(--dim);
+      }
+      .board .nick {
+        flex: 1;
+      }
+      .board .wertung {
+        font-variant-numeric: tabular-nums;
+      }
+      .board li.me {
+        outline: 2px solid var(--accent);
+      }
+      .board li.winner .nick::after {
+        content: " 🏆";
+      }
+      .players {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .players li {
+        background: var(--card);
+        border-radius: 8px;
+        padding: 8px 12px;
+      }
+      .players li.me {
+        outline: 2px solid var(--accent);
+      }
+      .controls {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .durations {
+        display: flex;
+        gap: 8px;
+      }
+      .btn {
+        background: var(--card);
+        color: var(--fg);
+        border: 1px solid #2c3644;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      .btn.active {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .btn.primary {
+        background: var(--accent);
+        color: #08131a;
+        border: none;
+        font-weight: 700;
+      }
+      .waiting,
+      .disconnected {
+        color: var(--dim);
+        text-align: center;
+      }
+      .overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 11, 15, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+      }
+      .overlay-box {
+        background: var(--card);
+        border-radius: 12px;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: min(90vw, 380px);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+      }
+      .nickname {
+        flex: 1;
+        background: var(--bg);
+        color: var(--fg);
+        border: 1px solid #2c3644;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -51,10 +51,13 @@ export class GameServer {
     this.conns.set(conn.id, conn);
     if (this.state === null) {
       this.state = createGame(conn.id);
+      conn.send(JSON.stringify({ type: "hello", playerId: conn.id, isHost: true }));
       this.broadcast();
       return;
     }
-    conn.send(JSON.stringify(toSnapshot(this.state)));
+    const state = this.state;
+    conn.send(JSON.stringify({ type: "hello", playerId: conn.id, isHost: false }));
+    conn.send(JSON.stringify(toSnapshot(state)));
   }
 
   /** A client sent a raw (JSON) message. */
