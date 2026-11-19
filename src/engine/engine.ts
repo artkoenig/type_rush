@@ -16,6 +16,8 @@ export interface PlayerState {
   errors: number;
   /** Cursor position in the round text. */
   cursor: number;
+  /** Elapsed seconds when the player finished the text (null if not yet finished). */
+  finishedAt: number | null;
 }
 
 export interface GameState {
@@ -87,7 +89,15 @@ export function createGame(hostId: string): GameState {
   return {
     phase: "lobby",
     players: [
-      { id: hostId, nickname: DEFAULT_NICKNAME, isHost: true, correct: 0, errors: 0, cursor: 0 },
+      {
+        id: hostId,
+        nickname: DEFAULT_NICKNAME,
+        isHost: true,
+        correct: 0,
+        errors: 0,
+        cursor: 0,
+        finishedAt: null,
+      },
     ],
     startRight: hostId,
     duration: 60,
@@ -140,6 +150,7 @@ function handleJoin(state: GameState, event: GameEvent & { type: "join" }): Game
       correct: 0,
       errors: 0,
       cursor: 0,
+      finishedAt: null,
     },
   ];
   return { ...state, players };
@@ -160,7 +171,13 @@ function handleStart(
     timeRemaining: state.duration,
     clockAtRoundStart: clock(),
     winnerId: null,
-    players: state.players.map((p) => ({ ...p, correct: 0, errors: 0, cursor: 0 })),
+    players: state.players.map((p) => ({
+      ...p,
+      correct: 0,
+      errors: 0,
+      cursor: 0,
+      finishedAt: null,
+    })),
   };
 }
 
@@ -176,7 +193,16 @@ function handleKeystroke(
   const expected = state.text[player.cursor];
   const players = state.players.map((p) => {
     if (p.id !== event.playerId) return p;
-    if (event.key === expected) return { ...p, correct: p.correct + 1, cursor: p.cursor + 1 };
+    if (event.key === expected) {
+      const newCursor = p.cursor + 1;
+      const finished = newCursor >= state.text.length;
+      return {
+        ...p,
+        correct: p.correct + 1,
+        cursor: newCursor,
+        finishedAt: finished ? liveElapsed(state) : p.finishedAt,
+      };
+    }
     return { ...p, errors: p.errors + 1 }; // blocking error: cursor does not advance (ADR 0003)
   });
   return { ...state, players };
@@ -229,7 +255,13 @@ function handleBackToLobby(
 ): GameState | null {
   if (state.phase !== "results") return null;
   if (!state.players.some((p) => p.id === event.playerId)) return null;
-  const players = state.players.map((p) => ({ ...p, correct: 0, errors: 0, cursor: 0 }));
+  const players = state.players.map((p) => ({
+    ...p,
+    correct: 0,
+    errors: 0,
+    cursor: 0,
+    finishedAt: null,
+  }));
   // Start-Recht rotates to the next player in join order (cyclic).
   const holderIndex = players.findIndex((p) => p.id === state.startRight);
   const next = players[(holderIndex + 1) % players.length];
@@ -245,14 +277,16 @@ function handleBackToLobby(
 }
 
 /** Players ordered by Wertung (descending); ties keep join order. */
-function rankPlayers(players: readonly PlayerState[], elapsedSec: number): PlayerState[] {
-  return [...players].sort(
-    (a, b) => wertung(b.correct, b.errors, elapsedSec) - wertung(a.correct, a.errors, elapsedSec),
-  );
+function rankPlayers(players: readonly PlayerState[], defaultElapsed: number): PlayerState[] {
+  return [...players].sort((a, b) => {
+    const elapsedA = a.finishedAt ?? defaultElapsed;
+    const elapsedB = b.finishedAt ?? defaultElapsed;
+    return wertung(b.correct, b.errors, elapsedB) - wertung(a.correct, a.errors, elapsedA);
+  });
 }
 
-function leaderboard(state: GameState, elapsedSec: number): PlayerState[] {
-  return rankPlayers(state.players, elapsedSec);
+function leaderboard(state: GameState, defaultElapsed: number): PlayerState[] {
+  return rankPlayers(state.players, defaultElapsed);
 }
 
 function liveElapsed(state: GameState): number {
@@ -260,24 +294,27 @@ function liveElapsed(state: GameState): number {
 }
 
 export function toSnapshot(state: GameState): Snapshot {
-  const elapsed =
+  const defaultElapsed =
     state.phase === "round" ? liveElapsed(state) : state.phase === "results" ? state.duration : 0;
   const ordered =
     state.phase === "round" || state.phase === "results"
-      ? leaderboard(state, elapsed)
+      ? leaderboard(state, defaultElapsed)
       : state.players;
   return {
     phase: state.phase,
-    players: ordered.map((p) => ({
-      id: p.id,
-      nickname: p.nickname,
-      isHost: p.isHost,
-      correct: p.correct,
-      errors: p.errors,
-      total: p.correct + p.errors,
-      cursor: p.cursor,
-      wertung: elapsed > 0 ? wertung(p.correct, p.errors, elapsed) : 0,
-    })),
+    players: ordered.map((p) => {
+      const elapsed = p.finishedAt ?? defaultElapsed;
+      return {
+        id: p.id,
+        nickname: p.nickname,
+        isHost: p.isHost,
+        correct: p.correct,
+        errors: p.errors,
+        total: p.correct + p.errors,
+        cursor: p.cursor,
+        wertung: elapsed > 0 ? wertung(p.correct, p.errors, elapsed) : 0,
+      };
+    }),
     startRight: state.startRight,
     duration: state.duration,
     text: state.text,

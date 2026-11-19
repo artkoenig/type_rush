@@ -36,7 +36,15 @@ describe("createGame", () => {
     const game = createGame("host");
     expect(game.phase).toBe("lobby");
     expect(game.players).toEqual([
-      { id: "host", nickname: "Host", isHost: true, correct: 0, errors: 0, cursor: 0 },
+      {
+        id: "host",
+        nickname: "Host",
+        isHost: true,
+        correct: 0,
+        errors: 0,
+        cursor: 0,
+        finishedAt: null,
+      },
     ]);
     expect(game.startRight).toBe("host");
     expect(game.duration).toBe(60);
@@ -360,6 +368,32 @@ describe("Wertung", () => {
     expect(host.wertung).toBe(0);
     expect(snap.winnerId).toBe("p1");
   });
+
+  it("keeps a stable score for a finished player across ticks (regression)", () => {
+    const { clock, advance } = makeClock(0);
+    const text = "hallo";
+    const { state } = run(
+      createGame("host"),
+      [
+        { type: "join", playerId: "p1", nickname: "Alice" },
+        { type: "start", playerId: "host", text },
+      ],
+      clock,
+    );
+    const finishEvents: GameEvent[] = [
+      { type: "keystroke", playerId: "p1", key: "h" },
+      { type: "keystroke", playerId: "p1", key: "a" },
+      { type: "keystroke", playerId: "p1", key: "l" },
+      { type: "keystroke", playerId: "p1", key: "l" },
+      { type: "keystroke", playerId: "p1", key: "o" },
+    ];
+    const afterFinish = run(state, finishEvents, clock);
+    const scoreAtFinish = last(afterFinish.snapshots).players.find((p) => p.id === "p1")!.wertung;
+    advance(30);
+    const afterTick = run(afterFinish.state, [{ type: "tick" }], clock);
+    const scoreAfterTick = last(afterTick.snapshots).players.find((p) => p.id === "p1")!.wertung;
+    expect(scoreAfterTick).toBe(scoreAtFinish);
+  });
 });
 
 describe("leaderboard", () => {
@@ -583,7 +617,17 @@ describe("disconnect", () => {
     const lonely: GameState = {
       ...createGame("host"),
       phase: "results",
-      players: [{ id: "p1", nickname: "Alice", isHost: false, correct: 1, errors: 0, cursor: 1 }],
+      players: [
+        {
+          id: "p1",
+          nickname: "Alice",
+          isHost: false,
+          correct: 1,
+          errors: 0,
+          cursor: 1,
+          finishedAt: null,
+        },
+      ],
       startRight: null,
       text: "hallo",
       timeRemaining: 0,
