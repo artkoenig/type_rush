@@ -1,4 +1,4 @@
-# Blind-Tippen Multiplayer
+# TYPE RUSH
 
 Ein lokales Multiplayer-Spiel zum Erlernen des Blind-Tippens: Spieler tippen im Browser
 gegeneinander, koordiniert von einem Host-Server im lokalen Netz.

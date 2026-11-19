@@ -28,7 +28,7 @@ export function showNicknamePrompt(onSubmit: (nickname: string) => void): void {
   const box = el(
     "div",
     { class: "overlay-box" },
-    el("h1", {}, "Blind-Tippen"),
+    el("h1", {}, "TYPE RUSH"),
     el("p", {}, "Wie sollen wir dich nennen?"),
     row,
   );

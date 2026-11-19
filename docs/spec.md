@@ -1,4 +1,4 @@
-# Spec: Blind-Tippen Multiplayer (MVP)
+# Spec: TYPE RUSH (MVP)
 
 > Status: Entwurf. Triagie-Label `ready-for-agent` wird nach `/setup-matt-pocock-skills`
 > beim Veröffentlichen im Issue-Tracker gesetzt.

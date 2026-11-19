@@ -44,7 +44,7 @@ export function renderWaiting(
       : el("p", { class: "waiting" }, "Warte auf den Host…"),
   );
   app.replaceChildren(
-    el("h1", {}, "Blind-Tippen"),
+    el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Warten auf neue Session"),
     playerList(snap, myId),
     controls,
@@ -85,7 +85,7 @@ export function renderLobby(
   );
 
   app.replaceChildren(
-    el("h1", {}, "Blind-Tippen"),
+    el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Lobby"),
     playerList(snap, myId),
     controls,
@@ -147,7 +147,7 @@ export function renderRound(
   );
 
   app.replaceChildren(
-    el("h1", {}, "Blind-Tippen"),
+    el("h1", {}, "TYPE RUSH"),
     el("div", { class: "timer" }, formatTime(snap.timeRemaining)),
     chars,
     keyboard,
@@ -168,7 +168,7 @@ export function renderResults(
   actions: Actions,
 ): void {
   app.replaceChildren(
-    el("h1", {}, "Blind-Tippen"),
+    el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Ergebnis"),
     ranking(snap, myId),
     el(
@@ -197,7 +197,7 @@ function ranking(snap: Snapshot, myId: string | null): HTMLElement {
 
 export function renderDisconnected(app: HTMLElement): void {
   app.replaceChildren(
-    el("h1", {}, "Blind-Tippen"),
+    el("h1", {}, "TYPE RUSH"),
     el("p", { class: "disconnected" }, "Verbindung getrennt"),
     el("button", { class: "btn primary", on: { click: () => location.reload() } }, "Neu laden"),
   );

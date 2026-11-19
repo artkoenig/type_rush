@@ -1,4 +1,4 @@
-# MVP – Blind-Tippen Multiplayer
+# MVP – TYPE RUSH
 
 ## Prinzip
 Race mit fester Zeit: Alle Spieler tippen denselben Text gleichzeitig; die höchste

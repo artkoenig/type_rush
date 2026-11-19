@@ -50,7 +50,7 @@ wss.on("connection", (ws) => {
 });
 
 httpServer.listen(PORT, () => {
-  console.log(`blind-typing-multiplayer: open http://${lanIp()}:${PORT} in your browser`);
+  console.log(`type-rush: open http://${lanIp()}:${PORT} in your browser`);
 });
 
 setInterval(() => game.tick(), TICK_INTERVAL_MS);
