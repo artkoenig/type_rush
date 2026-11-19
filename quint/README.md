@@ -11,18 +11,21 @@ Adapter und bewusst **nicht** modelliert.
 |---|---|
 | `blindTyping.qnt` | Engine: Typen, Invarianten, Witnesses, 9 guarded Actions, `step`. Nimmt Konstanten als Modul-Parameter. |
 | `blindTyping_3.qnt` | Instanz (4 Spieler, 2 kurze Texte, 6 Tasten) für `quint run` — klein genug für schnelle, breite Erkundung. |
-| `blindTyping_test.qnt` | 13 deterministische Tests (`quint test`) für seltene/sequenzielle Pfade. |
+| `blindTyping_test.qnt` | 15 deterministische Tests (`quint test`) für seltene/sequenzielle Pfade. |
 
 ## Ausführen
 
 ```bash
-quint typecheck quint/blindTyping.qnt quint/blindTyping_3.qnt quint/blindTyping_test.qnt
+# typecheck: quint akzeptiert nur EINE Datei pro Aufruf
+quint typecheck quint/blindTyping.qnt
+quint typecheck quint/blindTyping_3.qnt
+quint typecheck quint/blindTyping_test.qnt
 
 # Simulation (1000 Traces, 400 Schritte, alle Invarianten + Witnesses)
 quint run quint/blindTyping_3.qnt --main blindTyping_3 \
   --max-samples 1000 --max-steps 400 \
   --invariants cursorEqualsCorrect cursorBounded nonNegative queueMatchesPlayers startHolderValid timeBounded resultsTimeZero \
-  --witnesses reachedRound reachedResults reachedGameOver someError someFinished secondRound soloRound rotation emptyRound emptyResults
+  --witnesses reachedWaiting reachedRound reachedResults someError someFinished secondRound soloRound rotation emptyRound emptyResults
 
 # Tests — ACHTUNG: --match '.*Test$' ist Pflicht, sonst führt quint test
 # auch alle importierten Defs als Tests aus (QNT516/QNT502-Noise).
@@ -34,68 +37,77 @@ Quint 0.33.1 (brew) hat kein `basicSpells` — nur die Built-ins.
 ## Modell-Entscheidungen (Annahmen)
 
 - **Einer Actor, ein State-Record** (`phase`, `players`, `joinQueue`,
-  `roundDuration`, `timeRemaining`, `roundText`, `roundNumber`, `roundStarters`).
-  Kein Choreo: die Spec definiert selbst eine einzige Testnaht.
+  `roundDuration`, `timeRemaining`, `roundText`, `roundNumber`,
+  `roundStarters`). Kein Choreo: die Spec definiert selbst eine einzige
+  Testnaht.
 - **Text als `List[str]`** (Quint hat keine String-Operationen); ein
   Element pro Zeichen.
-- **Keystroke nur bei `timeRemaining > 0`**: Tasten geschehen zwischen Ticks;
-  in der letzten Sekunde ist der Cursor „zu" (Modellierungswahl, Spec still).
-- **Host spielt immer** (Spec-Regel): auto-Join bei Verbindung,
-  Default-Nickname `HOST_NICK`; Host-Disconnect beendet das Spiel;
-  Host kann immer die Dauer wählen.
+- **Keystroke nur bei `timeRemaining > 0`**: Tasten geschehen zwischen
+  Ticks; in der letzten Sekunde ist der Cursor „zu" (Modellierungswahl,
+  Spec still).
+- **Host = erster Spieler** (Spec-Regel): `init` ist leer (kein Auto-Join);
+  der erste `join` wird Host. Quint kann Strings nicht konkatenieren, daher
+  gibt es kein `displayName` — stattdessen `pure def isHost(pid): bool`,
+  und das „(Host)"-Suffix ist eine UI-Ableitung (Nickname + Flag).
+  Modell-Limitation: `HOST` ist eine Modul-Konstante — disconnectet der
+  Host, kann niemand mehr `startSession` (kein Deadlock: `join`/
+  `disconnect` bleiben aktiv). Die App weicht ab: sie promoted den nächsten
+  Spieler zum Host (docs/spec.md).
+- **Session-Zyklus:** `WaitingForNewSession → Lobby → Round → Results →
+  WaitingForNewSession → …`. `startSession(HOST)` (nur aus Waiting, nur
+  Host; Spieler + Queue bleiben erhalten) und `endSession` (nur aus Results;
+  rotiert das Start-Recht) ersetzen das alte `backToLobby`. Leere
+  Runde/Results beenden das Spiel **nicht** mehr — der Zyklus geht weiter.
 - **Wertung = Spec-Formel** `score = Genauigkeit² × Zeichen/s × 100`
   (int-Arithmetik; 10c/0e, 60 s → 16 schlägt 12c/6e → 8).
 - **Finger-Hinweis/Leaderboard/WPM/Genauigkeit** sind reine Ableitungen
-  (`accuracy`, `wpm` als pure defs), nicht gespeichert, nicht gewertet (ADR 0003).
-- **`emptyGameOver` (leere Results → GameOver)**: defensive Spec-Regel;
-  mit Host-Auto-Join unerreichbar (Sicherheitsnetz, Witness `emptyResults` = 0 %).
+  (`accuracy`, `wpm` als pure defs), nicht gespeichert, nicht gewertet
+  (ADR 0003).
 
 ## Abdeckung: Spec-Story → Modell
 
 | Spec (docs/spec.md) | Modell |
 |---|---|
-| Join in Lobby, 2–8 Spieler, Nickname | `join` + `canJoin` (Lobby, kein Doppel-join, `< MAX_PLAYERS`) |
-| Start-Recht rotiert, frühester Joiner zuerst, 1+ Spieler | `startRound` + `startHolder` (Queue-Kopf) + Rotation in `backToLobby` |
+| Host = erster Spieler, kein Auto-Join, eigener Name | `init` (leer) + `isHost` + Test `hostSetsOwnNameTest` |
+| Session-Zyklus Waiting→Lobby→Round→Results→Waiting | `startSession`/`endSession` + Witnesses `reachedWaiting`, `secondRound`, `rotation`, `soloRound` |
+| Join nur ohne laufendes Spiel (Waiting/Lobby), 2–8 Spieler, Nickname | `join` + `canJoin` + Tests `joinBlockedInRoundTest`, `joinBlockedInResultsTest` |
+| Start-Recht rotiert, frühester Joiner zuerst, 1+ Spieler | `startRound` + `startHolder` (Queue-Kopf) + Rotation in `endSession` |
 | Feste Dauer 30/60/120 s, Host wählt, 60 Default | `setDuration` (nur Host) + `DEFAULT_DURATION` |
 | Gleicher zufälliger Text für alle | `startRound(pid, text)` setzt `roundText` global |
 | Blockierende falsche Taste (ADR 0003) | `keystroke` + Invarianten `cursorEqualsCorrect`, `cursorBounded` |
 | Runde endet nach fester Dauer | `tick`/`roundEnd` + `timeBounded`, `resultsTimeZero` |
 | Wertung Tempo+Genauigkeit | `score(p, durationSec)` + Test `scoreSlowBeatsFastTest` |
 | Live-Leaderboard, eigene WPM/Genauigkeit | `accuracy`, `wpm` (pure, abgeleitet) |
-| Disconnect entfernt Spieler | `disconnect` + Test `disconnectRemovesFromQueueTest` |
-| Host verlässt → Spielende für alle | `disconnect` (pid==HOST → GameOver) + Test |
-| Host spielt immer (auto-Join in `init`) | `init` + `HOST_NICK` |
+| Disconnect entfernt Spieler | `disconnect` + Tests `hostLeaveRemovesTest`, `disconnectRemovesFromQueueTest` |
 | Dauer wählt nur Host (Kaller-Check) | `setDuration(pid, d)` |
 | Holder verlässt Lobby → nächster | `startHolder` (Queue-Kopf) + Invariante `startHolderValid` |
-| Join nur in Lobby (Gap-Answer 1) | `canJoin` + Test `joinOnlyInLobbyTest` |
 | Text fertig → warten, Wertung fixiert (Gap-Answer 2) | `finished` in `canKeystroke` + Tests `finishBlocksKeystrokeTest`, `finishScoreFixedTest` |
+| Leere Runde/Results → Session-Zyklus weiter (kein GameOver) | `roundEnd`/`endSession` + Witnesses `emptyRound`, `emptyResults` |
 | Keine Persistenz/Accounts/Sound/QR | nicht modelliert (keine State-Felder dafür) |
-| Leere Results → GameOver (defensive) | `emptyGameOver` + Witness `emptyResults` (0 %) |
 
-**Tests (13, alle grün):** scoreSlowBeatsFast, blocking, correctKeystroke,
-finishBlocksKeystroke, finishScoreFixed, rotation, soloCycle,
-hostLeaveEndsGame, disconnectRemovesFromQueue, joinOnlyInLobby, noDoubleJoin,
-durationNonHostBlocked, durationHostSets.
+**Tests (15, alle grün):** scoreSlowBeatsFast, blocking, correctKeystroke,
+finishBlocksKeystroke, finishScoreFixed, rotation, soloCycle, hostLeaveRemoves,
+disconnectRemovesFromQueue, joinBlockedInRound, joinBlockedInResults,
+noDoubleJoin, durationNonHostBlocked, durationHostSets, hostSetsOwnName.
 
-**Simulation (1000 Traces, 400 Schritte):** alle 7 Invarianten halten.
-Erreichbarkeit: Round 47 %, Results 0,5 %, GameOver 100 % (Host-Disconnect
-dominiert), Error 28 %, Solo-Runde 26 %, zweite Runde 0,4 %,
-**leere Runde 0 %**, **leere Results 0 %** (defensive Regel unerreichbar,
-wie erwartet mit Host-Auto-Join).
+**Simulation (1000 Traces, 400 Schritte):** alle 7 Invarianten halten,
+kein Deadlock. Erreichbarkeit: Waiting 100 %, Round 100 %, Results 100 %,
+zweite Runde 100 %, Solo-Runde 100 %, Rotation 72,1 %, Error 99,4 %,
+Finished 0,6 %, leere Runde 100 %, leere Results 100 % (der Session-Zyklus
+macht leere Zustände regulär erreichbar — sie beenden das Spiel nicht mehr).
 
 ## ⚠️ Gefundene Lücken/Fehler in der Spec
 
 1. ~~**Deadlock: letzter Nicht-Host-Spieler verlässt mitten in der Runde.**~~
-   **Gelöst (2026-11-18):** Die Spec war hier still — nach einem Disconnect
-   mit **null** Spielern in der Runde wäre kein Terminal-Zustand erreichbar
-   (`backToLobby` braucht ≥ 1 Spieler in der Queue; in 23,6 % der
-   Simulation-Traces erreicht). **Entscheidung:** Runde läuft zu Ende,
-   leere Results → GameOver. Regel jetzt in `docs/spec.md` und im Modell
-   (`emptyGameOver`).
+   **Gelöst (2026-11-18, überarbeitet 2026-11-19):** Ursprünglich: leere
+   Results → GameOver. Mit dem Session-Zyklus
+   (`Results → endSession → WaitingForNewSession`) gibt es keinen
+   Terminal-Zustand mehr: leere Runde/Results beenden das Spiel nicht,
+   eine neue Session kann immer gestartet werden.
 2. ~~**Host-Teilnahme ist nicht erzwungen.**~~
-   **Gelöst (2026-11-18):** „Host spielt immer" (auto-Join bei Verbindung,
-   Default-Nickname „Host"). Consequence: Host-Disconnect = Spielende;
-   Host kann immer Dauer wählen. Regel jetzt in `docs/spec.md`.
+   **Gelöst (2026-11-18, überarbeitet 2026-11-19):** Design-Entscheidung:
+   Host = erster Spieler, der über den normalen Join-Dialog eintritt
+   (kein Auto-Join, eigener Name, „(Host)"-Suffix in der UI).
 3. ~~**Start-Recht-Holder verlässt die Lobby** → nächster übernimmt.~~
    **Gelöst (2026-11-18):** Spec-Satz ergänzt: „If the holder leaves the
    lobby, the next player in the queue holds it." (Modell macht das bereits

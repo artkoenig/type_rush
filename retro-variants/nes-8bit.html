@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Blind-Tippen – 8-Bit / NES</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0f0f0f;
+  --fg: #ffffff;
+  --dim: #888888;
+  --accent: #e80000;
+  --accent2: #00e8e8;
+  --error: #ff0000;
+  --card: #1a1a2e;
+  --border: #444444;
+  --green: #00e800;
+  --yellow: #ffe800;
+  --blue: #0066ff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Press Start 2P', monospace;
+  min-height: 100vh;
+  image-rendering: pixelated;
+}
+#app {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+h1 {
+  font-size: 1.2rem;
+  margin: 0;
+  color: var(--yellow);
+  text-shadow: 3px 3px 0 #000;
+  text-align: center;
+}
+h2, h3 {
+  font-size: 0.7rem;
+  margin: 0;
+  color: var(--dim);
+}
+.timer {
+  font-size: clamp(1.5rem, 6vw, 2.5rem);
+  text-align: center;
+  color: var(--accent2);
+  text-shadow: 2px 2px 0 #000;
+}
+.text {
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(0.6rem, 2vw, 1rem);
+  line-height: 2.2;
+  text-align: center;
+  background: var(--card);
+  border: 4px solid var(--border);
+  padding: 16px;
+  word-break: break-word;
+}
+.char.typed { color: var(--dim); }
+.char.next {
+  background: var(--yellow);
+  color: #000;
+  outline: 2px solid var(--yellow);
+}
+.char.error {
+  background: var(--error);
+  color: #fff;
+  outline: 2px solid var(--error);
+}
+.keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+.kb-row { display: flex; gap: 3px; }
+.key {
+  width: clamp(20px, 6vw, 36px);
+  height: clamp(28px, 8vw, 44px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 3px solid var(--border);
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(0.5rem, 1.8vw, 0.7rem);
+  color: var(--dim);
+}
+.key-space { width: clamp(100px, 50vw, 220px); }
+.key-finger { color: var(--fg); background: #2a2a4e; border-color: #555; }
+.key-next {
+  background: var(--accent2);
+  color: #000;
+  border-color: var(--accent2);
+  box-shadow: 0 0 8px var(--accent2);
+}
+.hint {
+  text-align: center;
+  color: var(--dim);
+  font-size: 0.6rem;
+  margin: 0;
+}
+.bottom {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.stats {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+}
+.stat-value {
+  font-size: 1.2rem;
+  color: var(--green);
+}
+.stat span:last-child {
+  font-size: 0.5rem;
+  color: var(--dim);
+}
+.board {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+}
+.board li {
+  display: flex;
+  gap: 8px;
+  background: var(--card);
+  border: 3px solid var(--border);
+  padding: 8px 10px;
+  font-size: 0.6rem;
+}
+.board .rank { color: var(--yellow); width: 2em; }
+.board .nick { flex: 1; }
+.board .wertung { color: var(--accent2); }
+.board li.me { border-color: var(--accent); }
+.board li.winner .nick::after { content: " ★"; color: var(--yellow); }
+.players {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.players li {
+  background: var(--card);
+  border: 3px solid var(--border);
+  padding: 8px 10px;
+  font-size: 0.6rem;
+}
+.players li.me { border-color: var(--accent); }
+.controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.durations { display: flex; gap: 6px; }
+.btn {
+  background: var(--card);
+  color: var(--fg);
+  border: 4px solid var(--border);
+  padding: 10px 14px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.6rem;
+  cursor: pointer;
+}
+.btn:hover { border-color: var(--accent2); }
+.btn.active { border-color: var(--yellow); color: var(--yellow); }
+.btn.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: #ff4444;
+}
+.btn.primary:hover { background: #ff2222; }
+.waiting, .disconnected {
+  color: var(--dim);
+  text-align: center;
+  font-size: 0.6rem;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.overlay-box {
+  background: var(--card);
+  border: 4px solid var(--border);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(90vw, 340px);
+}
+.row { display: flex; gap: 8px; }
+.nickname {
+  flex: 1;
+  background: var(--bg);
+  color: var(--fg);
+  border: 3px solid var(--border);
+  padding: 10px 12px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.7rem;
+}
+/* Scanline overlay for retro feel */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.15) 2px,
+    rgba(0,0,0,0.15) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>BLIND-TIPPEN</h1>
+  <div class="timer">1:30</div>
+  <div class="text">
+    <span class="char typed">D</span><span class="char typed">a</span><span class="char typed">s</span><span class="char typed"> </span><span class="char typed">T</span><span class="char next">i</span><span class="char">p</span><span class="char">p</span><span class="char">e</span><span class="char">n</span><span class="char"> </span><span class="char">i</span><span class="char">s</span><span class="char">t</span><span class="char"> </span><span class="char">k</span><span class="char">e</span><span class="char">i</span><span class="char">n</span><span class="char"> </span><span class="char">S</span><span class="char">p</span><span class="char">a</span><span class="char">s</span><span class="char">s</span><span class="char"> </span><span class="char">f</span><span class="char">ü</span><span class="char">r</span><span class="char"> </span><span class="char">d</span><span class="char">i</span><span class="char">e</span><span class="char"> </</span><span class="char">F</span><span class="char">u</span><span class="char">n</span><span class="char">k</span><span class="char">t</span><span class="char">i</span><span class="char">o</span><span class="char">n</span><span class="char">s</span><span class="char">t</span><span class="char">a</span><span class="char">r</span><span class="char">t</span>
+  </div>
+  <div class="keyboard">
+    <div class="kb-row">
+      <div class="key key-finger">Q</div><div class="key key-finger">W</div><div class="key key-finger">E</div><div class="key key-finger">R</div><div class="key key-finger">T</div><div class="key key-finger">Z</div><div class="key key-finger">U</div><div class="key key-finger">I</div><div class="key key-finger">O</div><div class="key key-finger">P</div>
+    </div>
+    <div class="kb-row">
+      <div class="key key-finger">A</div><div class="key key-finger">S</div><div class="key key-finger">D</div><div class="key key-next">F</div><div class="key key-finger">G</div><div class="key key-finger">H</div><div class="key key-finger">J</div><div class="key key-finger">K</div><div class="key key-finger">L</div>
+    </div>
+    <div class="kb-row">
+      <div class="key key-finger">Y</div><div class="key key-finger">X</div><div class="key key-finger">C</div><div class="key key-finger">V</div><div class="key key-finger">B</div><div class="key key-finger">N</div><div class="key key-finger">M</div>
+    </div>
+    <div class="kb-row">
+      <div class="key key-space key-finger">LEER</div>
+    </div>
+  </div>
+  <p class="hint">Zeigefinger rechts</p>
+  <div class="bottom">
+    <div class="stats">
+      <div class="stat"><span class="stat-value">52</span> <span>WPM</span></div>
+      <div class="stat"><span class="stat-value">94%</span> <span>TREFFER</span></div>
+    </div>
+    <div>
+      <h3>RANGLISTE</h3>
+      <ol class="board">
+        <li class="me"><span class="rank">1.</span><span class="nick">MegaTyper</span><span class="wertung">1580</span></li>
+        <li><span class="rank">2.</span><span class="nick">PixelPete</span><span class="wertung">1320</span></li>
+        <li><span class="rank">3.</span><span class="nick">ByteBea</span><span class="wertung">990</span></li>
+      </ol>
+    </div>
+  </div>
+</div>
+</body>
+</html>

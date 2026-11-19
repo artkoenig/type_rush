@@ -9,7 +9,6 @@ module blindTyping_3 {
     DURATIONS = Set(30, 60, 120),
     TEXTS = Set(List("a", "b", "c"), List("d", "e", "f", "g", "h")),
     KEYS = Set("a", "b", "c", "d", "e", "f", "g", "h", "x"),
-    NICKNAMES = Set("ann", "ben", "carl", "dora"),
-    HOST_NICK = "host"
+    NICKNAMES = Set("ann", "ben", "carl", "dora")
   ).* from "./blindTyping"
 }

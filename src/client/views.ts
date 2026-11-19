@@ -5,21 +5,14 @@ import { fingerLabel, renderKeyboard } from "./keyboard.js";
 import { fingerFor } from "../engine/fingerMap.js";
 
 export interface Actions {
+  startSession(): void;
   start(): void;
   setDuration(duration: Duration): void;
-  backToLobby(): void;
+  endSession(): void;
 }
 
-export function renderLobby(
-  app: HTMLElement,
-  snap: Snapshot,
-  myId: string | null,
-  actions: Actions,
-): void {
-  const isHost = snap.players.find((p) => p.isHost)?.id === myId;
-  const holdsStart = snap.startRight === myId;
-
-  const list = el(
+function playerList(snap: Snapshot, myId: string | null): HTMLElement {
+  return el(
     "ul",
     { class: "players" },
     ...snap.players.map((p) =>
@@ -30,6 +23,42 @@ export function renderLobby(
       ),
     ),
   );
+}
+
+export function renderWaiting(
+  app: HTMLElement,
+  snap: Snapshot,
+  myId: string | null,
+  actions: Actions,
+): void {
+  const isHost = snap.players.find((p) => p.isHost)?.id === myId;
+  const controls = el(
+    "div",
+    { class: "controls" },
+    isHost
+      ? el(
+          "button",
+          { class: "btn primary", on: { click: () => actions.startSession() } },
+          "Session starten",
+        )
+      : el("p", { class: "waiting" }, "Warte auf den Host…"),
+  );
+  app.replaceChildren(
+    el("h1", {}, "Blind-Tippen"),
+    el("h2", {}, "Warten auf neue Session"),
+    playerList(snap, myId),
+    controls,
+  );
+}
+
+export function renderLobby(
+  app: HTMLElement,
+  snap: Snapshot,
+  myId: string | null,
+  actions: Actions,
+): void {
+  const isHost = snap.players.find((p) => p.isHost)?.id === myId;
+  const holdsStart = snap.startRight === myId;
 
   const controls = el(
     "div",
@@ -55,7 +84,12 @@ export function renderLobby(
       : el("p", { class: "waiting" }, "Warte auf Start…"),
   );
 
-  app.replaceChildren(el("h1", {}, "Blind-Tippen"), el("h2", {}, "Lobby"), list, controls);
+  app.replaceChildren(
+    el("h1", {}, "Blind-Tippen"),
+    el("h2", {}, "Lobby"),
+    playerList(snap, myId),
+    controls,
+  );
 }
 
 export function renderRound(
@@ -139,8 +173,8 @@ export function renderResults(
     ranking(snap, myId),
     el(
       "button",
-      { class: "btn primary", on: { click: () => actions.backToLobby() } },
-      "Nochmal spielen",
+      { class: "btn primary", on: { click: () => actions.endSession() } },
+      "Neue Session",
     ),
   );
 }

@@ -30,22 +30,21 @@ function send(conn: FakeConn, server: GameServer, msg: unknown): void {
 }
 
 describe("host connection", () => {
-  it("auto-joins the first connection as host", () => {
+  it("creates an empty waiting game for the first connection", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
-    expect(host.sent).toHaveLength(2);
+    expect(host.sent).toHaveLength(2); // hello + snapshot
     const snap = host.last();
-    expect(snap.phase).toBe("lobby");
-    expect(snap.players).toHaveLength(1);
-    expect(snap.players[0]).toMatchObject({ id: "h", nickname: "Host", isHost: true });
+    expect(snap.phase).toBe("waiting");
+    expect(snap.players).toHaveLength(0);
   });
 
   it("greets every new connection with a hello message", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
-    expect(JSON.parse(host.sent[0])).toEqual({ type: "hello", playerId: "h", isHost: true });
+    expect(JSON.parse(host.sent[0])).toEqual({ type: "hello", playerId: "h", isHost: false });
     const p2 = new FakeConn("p2");
     server.connect(p2);
     expect(JSON.parse(p2.sent[0])).toEqual({ type: "hello", playerId: "p2", isHost: false });
@@ -55,6 +54,7 @@ describe("host connection", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
+    send(host, server, { type: "join", nickname: "Host" });
     const p2 = new FakeConn("p2");
     server.connect(p2);
     expect(p2.sent).toHaveLength(2);
@@ -69,9 +69,11 @@ describe("join", () => {
     const p2 = new FakeConn("p2");
     server.connect(host);
     server.connect(p2);
+    send(host, server, { type: "join", nickname: "Host" });
     send(p2, server, { type: "join", nickname: "Bob" });
     expect(host.last().players.map((p) => p.nickname)).toEqual(["Host", "Bob"]);
     expect(p2.last().players.map((p) => p.nickname)).toEqual(["Host", "Bob"]);
+    expect(host.last().players[0].isHost).toBe(true);
   });
 
   it("ignores invalid messages without broadcasting", () => {
@@ -82,7 +84,32 @@ describe("join", () => {
     server.message(host, JSON.stringify(42));
     server.message(host, JSON.stringify({ type: "nope" }));
     server.message(host, JSON.stringify({ type: "join" }));
+    server.message(host, JSON.stringify({ type: "keystroke" }));
+    server.message(host, "null");
     expect(host.sent).toHaveLength(2);
+  });
+});
+
+describe("startSession", () => {
+  it("moves the game from waiting to the lobby when the host triggers it", () => {
+    const { server } = setup();
+    const host = new FakeConn("h");
+    server.connect(host);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
+    expect(host.last().phase).toBe("lobby");
+  });
+
+  it("rejects a startSession by a non-host", () => {
+    const { server } = setup();
+    const host = new FakeConn("h");
+    const p2 = new FakeConn("p2");
+    server.connect(host);
+    server.connect(p2);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
+    send(p2, server, { type: "startSession" });
+    expect(host.last().phase).toBe("waiting");
   });
 });
 
@@ -91,6 +118,8 @@ describe("start", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(host, server, { type: "start" });
     const snap = host.last();
     expect(snap.phase).toBe("round");
@@ -107,10 +136,12 @@ describe("start", () => {
     const p2 = new FakeConn("p2");
     server.connect(host);
     server.connect(p2);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(p2, server, { type: "join", nickname: "Bob" });
     send(p2, server, { type: "start" });
     expect(host.last().phase).toBe("lobby");
-    expect(host.sent).toHaveLength(3);
+    expect(host.sent).toHaveLength(5); // hello+snap, join, startSession, p2 join; start rejected
   });
 });
 
@@ -119,6 +150,8 @@ describe("keystroke", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(host, server, { type: "start" });
     const key = host.last().text[0];
     send(host, server, { type: "keystroke", key });
@@ -131,6 +164,8 @@ describe("keystroke", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(host, server, { type: "start" });
     const key = host.last().text[0] === "a" ? "b" : "a";
     send(host, server, { type: "keystroke", key });
@@ -145,6 +180,8 @@ describe("tick", () => {
     const { server, advance } = setup();
     const host = new FakeConn("h");
     server.connect(host);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(host, server, { type: "start" });
     advance(10);
     server.tick();
@@ -155,6 +192,8 @@ describe("tick", () => {
     const { server, advance } = setup();
     const host = new FakeConn("h");
     server.connect(host);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(host, server, { type: "start" });
     send(host, server, { type: "keystroke", key: host.last().text[0] });
     advance(60);
@@ -166,16 +205,20 @@ describe("tick", () => {
 });
 
 describe("disconnect", () => {
-  it("removes the host from the game; the phase stays unchanged", () => {
+  it("promotes the next player to host when the host leaves", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(host);
     server.connect(p2);
+    send(host, server, { type: "join", nickname: "Host" });
     send(p2, server, { type: "join", nickname: "Bob" });
     server.disconnect(host);
-    expect(p2.last().phase).toBe("lobby");
-    expect(host.last().phase).toBe("lobby");
+    const snap = p2.last();
+    expect(snap.phase).toBe("waiting");
+    expect(snap.players.map((p) => p.id)).toEqual(["p2"]);
+    expect(snap.players[0].isHost).toBe(true);
+    expect(snap.startRight).toBe("p2");
   });
 
   it("removes a non-host from the round, which continues", () => {
@@ -184,6 +227,8 @@ describe("disconnect", () => {
     const p2 = new FakeConn("p2");
     server.connect(host);
     server.connect(p2);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(p2, server, { type: "join", nickname: "Bob" });
     send(host, server, { type: "start" });
     server.disconnect(p2);
@@ -204,10 +249,12 @@ describe("disconnect", () => {
 });
 
 describe("setDuration", () => {
-  it("lets the host change the duration", () => {
+  it("lets the host change the duration in the lobby", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(host, server, { type: "setDuration", duration: 30 });
     expect(host.last().duration).toBe(30);
   });
@@ -218,6 +265,8 @@ describe("setDuration", () => {
     const p2 = new FakeConn("p2");
     server.connect(host);
     server.connect(p2);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(p2, server, { type: "join", nickname: "Bob" });
     send(p2, server, { type: "setDuration", duration: 30 });
     expect(host.last().duration).toBe(60);
@@ -227,26 +276,42 @@ describe("setDuration", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     server.connect(host);
-    send(host, server, { type: "setDuration", duration: 45 });
-    expect(host.sent).toHaveLength(2);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
+    server.message(host, JSON.stringify({ type: "setDuration", duration: 45 }));
+    expect(host.sent).toHaveLength(4); // hello+snap, join, startSession; invalid → no broadcast
   });
 });
 
-describe("backToLobby", () => {
-  it("returns to the lobby and rotates the start right", () => {
+describe("endSession", () => {
+  it("returns to the waiting phase and rotates the start right", () => {
     const { server, advance } = setup();
     const host = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(host);
     server.connect(p2);
+    send(host, server, { type: "join", nickname: "Host" });
+    send(host, server, { type: "startSession" });
     send(p2, server, { type: "join", nickname: "Bob" });
     send(host, server, { type: "start" });
     advance(60);
     server.tick();
-    send(host, server, { type: "backToLobby" });
+    send(host, server, { type: "endSession" });
     const snap = host.last();
-    expect(snap.phase).toBe("lobby");
+    expect(snap.phase).toBe("waiting");
     expect(snap.startRight).toBe("p2");
+  });
+});
+
+describe("before any connection", () => {
+  it("returns a null snapshot and ignores messages, ticks and disconnects", () => {
+    const server = new GameServer();
+    expect(server.snapshot()).toBeNull();
+    const ghost = new FakeConn("g");
+    server.message(ghost, JSON.stringify({ type: "join", nickname: "X" }));
+    server.tick();
+    server.disconnect(ghost);
+    expect(ghost.sent).toHaveLength(0);
   });
 });
 
@@ -259,6 +324,7 @@ describe("broadcast", () => {
     server.connect(host);
     server.connect(p2);
     server.connect(p3);
+    send(host, server, { type: "join", nickname: "Host" });
     send(p3, server, { type: "join", nickname: "C" });
     expect(host.last()).toEqual(p2.last());
     expect(host.last()).toEqual(p3.last());

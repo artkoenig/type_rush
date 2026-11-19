@@ -4,7 +4,7 @@ import { DURATIONS } from "../content/textPool";
 /** Monotonic clock in seconds, injected by the caller (never wall-clock in tests). */
 export type Clock = () => number;
 
-export type Phase = "lobby" | "round" | "results";
+export type Phase = "waiting" | "lobby" | "round" | "results";
 
 export interface PlayerState {
   id: string;
@@ -16,8 +16,8 @@ export interface PlayerState {
   errors: number;
   /** Cursor position in the round text. */
   cursor: number;
-  /** Elapsed seconds when the player finished the text (null if not yet finished). */
-  finishedAt: number | null;
+  /** Round-timer value (duration - timeRemaining) at the last keystroke; null if none yet. */
+  lastTypedAt: number | null;
 }
 
 export interface GameState {
@@ -39,12 +39,13 @@ export interface GameState {
 
 export type GameEvent =
   | { type: "join"; playerId: string; nickname: string }
+  | { type: "startSession"; playerId: string }
   | { type: "start"; playerId: string; text: string }
   | { type: "keystroke"; playerId: string; key: string }
   | { type: "tick" }
   | { type: "disconnect"; playerId: string }
   | { type: "setDuration"; playerId: string; duration: Duration }
-  | { type: "backToLobby"; playerId: string };
+  | { type: "endSession"; playerId: string };
 
 export interface PlayerSnapshot {
   id: string;
@@ -55,12 +56,14 @@ export interface PlayerSnapshot {
   total: number;
   cursor: number;
   wertung: number;
+  /** Round-timer value at the player's last keystroke (0 if none). Used for WPM display. */
+  typingElapsed: number;
 }
 
 /** Serializable view of the game state, emitted to all clients. */
 export interface Snapshot {
   phase: Phase;
-  /** Lobby: join order. Round/results: leaderboard by Wertung (descending). */
+  /** Waiting/lobby: join order. Round/results: leaderboard by Wertung (descending). */
   players: PlayerSnapshot[];
   startRight: string | null;
   duration: Duration;
@@ -75,7 +78,6 @@ export interface StepResult {
 }
 
 export const MAX_PLAYERS = 8;
-export const DEFAULT_NICKNAME = "Host";
 
 /** Wertung: 100·correct³ / (total²·elapsedSec), integer arithmetic, 0 if no keypresses. */
 export function wertung(correct: number, errors: number, elapsedSec: number): number {
@@ -84,22 +86,12 @@ export function wertung(correct: number, errors: number, elapsedSec: number): nu
   return Math.floor((100 * correct ** 3) / (total ** 2 * elapsedSec));
 }
 
-/** Creates a new game; the host auto-joins with the default nickname. */
-export function createGame(hostId: string): GameState {
+/** Creates an empty game waiting for its first player (the host joins via the normal dialog). */
+export function createGame(): GameState {
   return {
-    phase: "lobby",
-    players: [
-      {
-        id: hostId,
-        nickname: DEFAULT_NICKNAME,
-        isHost: true,
-        correct: 0,
-        errors: 0,
-        cursor: 0,
-        finishedAt: null,
-      },
-    ],
-    startRight: hostId,
+    phase: "waiting",
+    players: [],
+    startRight: null,
     duration: 60,
     text: "",
     timeRemaining: 0,
@@ -122,6 +114,8 @@ function apply(state: GameState, event: GameEvent, clock: Clock): GameState | nu
   switch (event.type) {
     case "join":
       return handleJoin(state, event);
+    case "startSession":
+      return handleStartSession(state, event);
     case "start":
       return handleStart(state, event, clock);
     case "keystroke":
@@ -132,28 +126,40 @@ function apply(state: GameState, event: GameEvent, clock: Clock): GameState | nu
       return handleDisconnect(state, event);
     case "setDuration":
       return handleSetDuration(state, event);
-    case "backToLobby":
-      return handleBackToLobby(state, event);
+    case "endSession":
+      return handleEndSession(state, event);
   }
 }
 
 function handleJoin(state: GameState, event: GameEvent & { type: "join" }): GameState | null {
-  if (state.phase !== "lobby") return null;
+  if (state.phase !== "waiting" && state.phase !== "lobby") return null;
   if (state.players.length >= MAX_PLAYERS) return null;
   if (state.players.some((p) => p.id === event.playerId)) return null;
+  const isHost = state.players.length === 0; // first joiner is the host
   const players = [
     ...state.players,
     {
       id: event.playerId,
       nickname: event.nickname,
-      isHost: false,
+      isHost,
       correct: 0,
       errors: 0,
       cursor: 0,
-      finishedAt: null,
+      lastTypedAt: null,
     },
   ];
-  return { ...state, players };
+  const startRight = state.startRight ?? (isHost ? event.playerId : null);
+  return { ...state, players, startRight };
+}
+
+function handleStartSession(
+  state: GameState,
+  event: GameEvent & { type: "startSession" },
+): GameState | null {
+  if (state.phase !== "waiting") return null;
+  const player = state.players.find((p) => p.id === event.playerId);
+  if (player === undefined || !player.isHost) return null;
+  return { ...state, phase: "lobby" };
 }
 
 function handleStart(
@@ -176,7 +182,7 @@ function handleStart(
       correct: 0,
       errors: 0,
       cursor: 0,
-      finishedAt: null,
+      lastTypedAt: null,
     })),
   };
 }
@@ -191,19 +197,18 @@ function handleKeystroke(
   if (event.key.length !== 1) return null;
   if (player.cursor >= state.text.length) return null; // text finished; further keys are ignored
   const expected = state.text[player.cursor];
+  const elapsed = state.duration - state.timeRemaining;
   const players = state.players.map((p) => {
     if (p.id !== event.playerId) return p;
     if (event.key === expected) {
-      const newCursor = p.cursor + 1;
-      const finished = newCursor >= state.text.length;
       return {
         ...p,
         correct: p.correct + 1,
-        cursor: newCursor,
-        finishedAt: finished ? liveElapsed(state) : p.finishedAt,
+        cursor: p.cursor + 1,
+        lastTypedAt: elapsed,
       };
     }
-    return { ...p, errors: p.errors + 1 }; // blocking error: cursor does not advance (ADR 0003)
+    return { ...p, errors: p.errors + 1, lastTypedAt: elapsed };
   });
   return { ...state, players };
 }
@@ -214,8 +219,25 @@ function handleTick(state: GameState, clock: Clock): GameState | null {
   const timeRemaining = Math.max(0, state.duration - elapsed);
   if (timeRemaining > 0) return { ...state, timeRemaining };
   // Round over → results.
-  const winner = state.players.length > 0 ? rankPlayers(state.players, state.duration)[0] : null;
+  const winner =
+    state.players.length > 0 ? rankPlayers(state.players, "results", state.duration)[0] : null;
   return { ...state, phase: "results", timeRemaining: 0, winnerId: winner?.id ?? null };
+}
+
+// If the host left, the new first player in join order becomes the host.
+function promoteNewHost(players: PlayerState[]): PlayerState[] {
+  if (players.length === 0) return players;
+  return players.map((p, i) => (i === 0 ? { ...p, isHost: true } : p));
+}
+
+function nextStartRight(players: PlayerState[]): string | null {
+  const first = players[0];
+  return first ? first.id : null;
+}
+
+function rankWinner(players: PlayerState[], duration: number): string | null {
+  const winner = rankPlayers(players, "results", duration)[0];
+  return winner ? winner.id : null;
 }
 
 function handleDisconnect(
@@ -224,18 +246,17 @@ function handleDisconnect(
 ): GameState | null {
   const player = state.players.find((p) => p.id === event.playerId);
   if (player === undefined) return null;
-  const players = state.players.filter((p) => p.id !== event.playerId);
-  if (state.phase === "lobby") {
-    const startRight =
-      state.startRight === event.playerId ? (players[0]?.id ?? null) : state.startRight;
-    return { ...state, players, startRight };
-  }
-  if (state.phase === "results") {
-    const winner = players.length > 0 ? rankPlayers(players, state.duration)[0] : null;
-    return { ...state, players, winnerId: winner?.id ?? null };
-  }
+  let players = state.players.filter((p) => p.id !== event.playerId);
+  if (player.isHost) players = promoteNewHost(players);
   // Round: removed from round and leaderboard; the round runs to completion.
-  return { ...state, players };
+  if (state.phase === "round") return { ...state, players };
+  if (state.phase === "results") {
+    return { ...state, players, winnerId: rankWinner(players, state.duration) };
+  }
+  // Waiting / lobby: if the leaver held the start right, it passes to the first remaining player.
+  const startRight =
+    state.startRight === event.playerId ? nextStartRight(players) : state.startRight;
+  return { ...state, players, startRight };
 }
 
 function handleSetDuration(
@@ -249,9 +270,9 @@ function handleSetDuration(
   return { ...state, duration: event.duration };
 }
 
-function handleBackToLobby(
+function handleEndSession(
   state: GameState,
-  event: GameEvent & { type: "backToLobby" },
+  event: GameEvent & { type: "endSession" },
 ): GameState | null {
   if (state.phase !== "results") return null;
   if (!state.players.some((p) => p.id === event.playerId)) return null;
@@ -260,50 +281,59 @@ function handleBackToLobby(
     correct: 0,
     errors: 0,
     cursor: 0,
-    finishedAt: null,
+    lastTypedAt: null,
   }));
+  if (players.length === 0) {
+    return {
+      ...state,
+      phase: "waiting",
+      players,
+      startRight: null,
+      text: "",
+      timeRemaining: 0,
+      winnerId: null,
+    };
+  }
   // Start-Recht rotates to the next player in join order (cyclic).
   const holderIndex = players.findIndex((p) => p.id === state.startRight);
   const next = players[(holderIndex + 1) % players.length];
   return {
     ...state,
-    phase: "lobby",
+    phase: "waiting",
     players,
-    startRight: next.id, // safe: results always has at least the host
+    startRight: next.id, // safe: results always has at least one player
     text: "",
     timeRemaining: 0,
     winnerId: null,
   };
 }
 
-/** Players ordered by Wertung (descending); ties keep join order. */
-function rankPlayers(players: readonly PlayerState[], defaultElapsed: number): PlayerState[] {
+/**
+ * Players ordered by Wertung (descending); ties keep join order.
+ * In the results phase the full duration is used as elapsed; in the round phase
+ * each player's own lastTypedAt (frozen at their last keystroke) is used.
+ */
+function rankPlayers(
+  players: readonly PlayerState[],
+  phase: Phase,
+  duration: number,
+): PlayerState[] {
   return [...players].sort((a, b) => {
-    const elapsedA = a.finishedAt ?? defaultElapsed;
-    const elapsedB = b.finishedAt ?? defaultElapsed;
+    const elapsedA = phase === "results" ? duration : (a.lastTypedAt ?? 0);
+    const elapsedB = phase === "results" ? duration : (b.lastTypedAt ?? 0);
     return wertung(b.correct, b.errors, elapsedB) - wertung(a.correct, a.errors, elapsedA);
   });
 }
 
-function leaderboard(state: GameState, defaultElapsed: number): PlayerState[] {
-  return rankPlayers(state.players, defaultElapsed);
-}
-
-function liveElapsed(state: GameState): number {
-  return Math.max(1, state.duration - state.timeRemaining);
-}
-
 export function toSnapshot(state: GameState): Snapshot {
-  const defaultElapsed =
-    state.phase === "round" ? liveElapsed(state) : state.phase === "results" ? state.duration : 0;
   const ordered =
     state.phase === "round" || state.phase === "results"
-      ? leaderboard(state, defaultElapsed)
+      ? rankPlayers(state.players, state.phase, state.duration)
       : state.players;
   return {
     phase: state.phase,
     players: ordered.map((p) => {
-      const elapsed = p.finishedAt ?? defaultElapsed;
+      const elapsed = state.phase === "results" ? state.duration : (p.lastTypedAt ?? 0);
       return {
         id: p.id,
         nickname: p.nickname,
@@ -313,6 +343,7 @@ export function toSnapshot(state: GameState): Snapshot {
         total: p.correct + p.errors,
         cursor: p.cursor,
         wertung: elapsed > 0 ? wertung(p.correct, p.errors, elapsed) : 0,
+        typingElapsed: p.lastTypedAt ?? 0,
       };
     }),
     startRight: state.startRight,

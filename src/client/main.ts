@@ -2,6 +2,7 @@ import type { Snapshot } from "../engine/engine.js";
 import type { Duration } from "../content/textPool.js";
 import {
   renderDisconnected,
+  renderWaiting,
   renderLobby,
   renderResults,
   renderRound,
@@ -22,15 +23,14 @@ let myId: string | null = null;
 let joined = false;
 let lastSnapshot: Snapshot | null = null;
 let cursorAtKeystroke: number | null = null;
-/** Elapsed seconds frozen when the player finished the text, so the WPM stops counting. */
-let finishedElapsed: number | null = null;
 
 const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
 
 const actions: Actions = {
+  startSession: () => send({ type: "startSession" }),
   start: () => send({ type: "start" }),
   setDuration: (duration: Duration) => send({ type: "setDuration", duration }),
-  backToLobby: () => send({ type: "backToLobby" }),
+  endSession: () => send({ type: "endSession" }),
 };
 
 function send(message: Record<string, unknown>): void {
@@ -45,17 +45,14 @@ ws.onmessage = (event: MessageEvent) => {
     return;
   }
   if (typeof data !== "object" || data === null) return;
-  const obj = data as { type?: unknown; playerId?: unknown; isHost?: unknown; phase?: unknown };
+  const obj = data as { type?: unknown; playerId?: unknown; phase?: unknown };
   if (obj.type === "hello") {
     myId = typeof obj.playerId === "string" ? obj.playerId : null;
-    if (obj.isHost === true) {
+    // Everyone (including the first player / host) enters a name via the same dialog.
+    showNicknamePrompt((nickname) => {
+      send({ type: "join", nickname });
       joined = true;
-    } else {
-      showNicknamePrompt((nickname) => {
-        send({ type: "join", nickname });
-        joined = true;
-      });
-    }
+    });
     return;
   }
   if (typeof obj.phase === "string") {
@@ -76,18 +73,14 @@ function handleSnapshot(snap: Snapshot): void {
     cursorAtKeystroke = null;
   }
   switch (snap.phase) {
+    case "waiting":
+      renderWaiting(app, snap, myId, actions);
+      break;
     case "lobby":
       renderLobby(app, snap, myId, actions);
       break;
     case "round": {
-      if (me !== undefined) {
-        if (me.cursor >= snap.text.length) {
-          if (finishedElapsed === null) finishedElapsed = snap.duration - snap.timeRemaining;
-        } else {
-          finishedElapsed = null; // new round, counting starts again
-        }
-      }
-      renderRound(app, snap, myId, error, finishedElapsed ?? snap.duration - snap.timeRemaining);
+      renderRound(app, snap, myId, error, me?.typingElapsed ?? 0);
       break;
     }
     case "results":

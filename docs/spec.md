@@ -26,7 +26,7 @@ zeigt ein Live-Leaderboard plus eigene WPM/Genauigkeit. Falsche Tasten blockiere
 1. As a Host, I want to start a server on my machine with one command, so that I can run a game without any setup or cloud.
 2. As a Host, I want a URL (http://192.168.x.x:port) shown on my screen, so that other players can join by opening it.
 3. As a player, I want to join the game by opening the URL in my browser, so that I need no installation or account.
-4. As a player, I want to enter a nickname when joining, so that I can be identified on the leaderboard.
+4. As a player (including the host), I want to enter my own nickname when joining, so that I can be identified on the leaderboard.
 5. As a Host, I want to see all joined players and their nicknames in the Lobby, so that I know who is ready.
 6. As a player, I want to see the other players in the Lobby, so that I know who I am racing against.
 7. As a player, I want the round to start when the player holding the Start-Recht triggers it (no countdown), so that we can begin on our own timing.
@@ -44,21 +44,21 @@ zeigt ein Live-Leaderboard plus eigene WPM/Genauigkeit. Falsche Tasten blockiere
 19. As a player, I want the round text to be a random common German word/sentence, so that content is realistic and varied each round.
 20. As a player, I want the text length calibrated to the round duration, so that a good typist finishes near the deadline (tension).
 21. As a player, I want to see final results (ranking by Wertung) when the round ends, so that I know who won.
-22. As a player, I want to be able to play another round after a round ends, so that we can keep competing.
+22. As a player, I want to be able to start a new session after a round ends (all players carry over), so that we can keep competing.
 23. As a player, when I disconnect, I want my seat handled gracefully (removed from the round/leaderboard), so that the game continues for others.
-24. As a Host, if I (the host) leave, I accept the game ends for everyone, so that the authoritative model stays simple.
+24. As a player, if the host disconnects, I want the next player in join order to be promoted to host, so that the game can continue and a new session can be started.
 25. As a player, I want to play on a phone or laptop browser, so that I can join from whatever device I have.
 26. As a player, I want visual (not audio) feedback for correct/incorrect keys, so that I get feedback without sound.
 
 ## Implementation Decisions
 
 - **Stack:** TypeScript end-to-end. Server: Node.js + a WebSocket library. Frontend: TS SPA with vanilla DOM (no heavy framework). (Q5)
-- **Authoritative server (ADR 0001):** The server receives every keystroke and computes all game state; the client renders. No client-side scoring. Consequence: host must stay; player count bound to host machine; no internet needed.
-- **Host always plays (rule, not description):** The host's browser session joins the lobby on connect (auto-join, default nickname "Host"); the host is always a player. Consequence: host leaving always ends the game (story 24), and the host can always set the round duration.
-- **Single test seam – the game engine:** All game rules live in one pure, deterministic, event-driven module (the engine) on the server. It is decoupled from the WebSocket transport and the frontend. The engine consumes a stream of events (join, start, keystroke, disconnect) plus round config, maintains per-player state (position, errors, WPM, accuracy, Wertung), and emits state snapshots (leaderboard, round phase, time remaining). The WebSocket layer and the browser SPA are thin adapters around it.
+- **Authoritative server (ADR 0001):** The server receives every keystroke and computes all game state; the client renders. No client-side scoring. Consequence: the game lives on the host machine; player count bound to host machine; no internet needed.
+- **Host = first player (rule, not description):** The first player to join becomes the host — through the same join dialog (nickname entry) as every other player; the host is NOT auto-joined and has no default nickname. The UI shows a "(Host)" suffix after the name (derived from the host flag, not stored in the name). Only the host can start a new session (from "Warten auf neue Session") and set the round duration. If the host disconnects, the next player in join order is promoted to host, so the game can continue.
+- **Session lifecycle:** `Warten auf neue Session → Lobby → Runde → Ergebnisse → Warten auf neue Session → …` (model: `WaitingForNewSession → Lobby → Round → Results → WaitingForNewSession`). The host starts a session from "Warten"; players and the Start-Recht queue carry over between sessions. An empty round or empty results (all players disconnected) no longer ends the game — the round runs to its fixed end, results are shown, and a new session can be started; if no players remain, the game simply waits for the next joiner (who becomes the new host).
+- **Join rule:** Players can join only while no game is running — in "Warten auf neue Session" or in the Lobby (up to 8 players, no double-join). During a round or in results, join is rejected.
+- **Single test seam – the game engine:** All game rules live in one pure, deterministic, event-driven module (the engine) on the server. It is decoupled from the WebSocket transport and the frontend. The engine consumes a stream of events (join, startSession, start, keystroke, tick, disconnect, setDuration, endSession) plus round config, maintains per-player state (position, errors, WPM, accuracy, Wertung), and emits state snapshots (leaderboard, round phase, time remaining). The WebSocket layer and the browser SPA are thin adapters around it.
 - **Round model (ADR 0002):** Fixed duration (60s default; host-selectable 30/60/120s). All players type the same text; highest Wertung wins. UI needs a timer, not finish-detection.
-- **Empty round / empty results (added after model verification):** If the last player in a round disconnects, the round still runs to its fixed end; the resulting empty results end the game (GameOver). Without this rule the game would deadlock (back-to-lobby requires at least one player).
-- Defensive note: with the host always playing, empty results cannot occur (the host is always in the round; host leaving ends the game immediately); the rule is kept as a safety net.
 - **Wertung:** `score = accuracy² × (correct chars / duration) × 100`, integer arithmetic, 0 if no keypresses (i.e. `100·correct³ / (total²·durationSec)`). Rewards technique: slow+correct beats fast+inaccurate (60s example: 10 correct/0 errors → 16 beats 12 correct/6 errors → 8; even 3× volume at 50% accuracy → 12 loses to the clean+slow player).
 - **Blocking errors (ADR 0003):** A wrong keypress does not advance the cursor; the spot is marked red; the correct key must be pressed to continue; every wrong press counts as an error.
 - **Finger mapping:** A QWERTZ home-row finger map (key → finger) drives the Finger-Hinweis. Pure function, used by both the engine (for any server-side needs) and the frontend diagram. Not part of the Wertung.
@@ -71,7 +71,7 @@ zeigt ein Live-Leaderboard plus eigene WPM/Genauigkeit. Falsche Tasten blockiere
 
 - **Good test = external behavior only.** Tests feed the engine a sequence of events (with a controlled clock) and assert on the emitted state snapshots and final results — never on internal implementation details.
 - **Primary seam: the game engine.** It is the single highest seam. Because it is pure and deterministic (clock injected, not wall-clock), tests are fast and stable.
-- **Engine behaviors covered by tests:** join/nickname; Start-Recht rotation and solo start; round start with no countdown; fixed-time progression via injected clock; blocking wrong-key handling (cursor stays, error counted); correct-key advancement; WPM/accuracy/Wertung computation; leaderboard ordering; disconnect handling; host-leave ends game; final ranking.
+- **Engine behaviors covered by tests:** join/nickname (host and non-host); session start/end lifecycle; Start-Recht rotation and solo start; round start with no countdown; fixed-time progression via injected clock; blocking wrong-key handling (cursor stays, error counted); correct-key advancement; WPM/accuracy/Wertung computation; leaderboard ordering; disconnect handling; host-leave promotes new host; final ranking.
 - **Pure helpers** (QWERTZ finger map, text-length calibration, WPM/accuracy formulas) may be unit-tested directly where non-trivial, but their *behavior* is verified through the engine seam.
 - **Not tested separately:** the WebSocket transport and the browser SPA (thin I/O/presentation adapters). Frontend rendering is covered by the engine's emitted snapshots being correct.
 - **Prior art:** none yet (empty repo) – the engine's test suite is the first; it establishes the pattern (pure function, injected clock, event-in / snapshot-out).
@@ -91,5 +91,5 @@ zeigt ein Live-Leaderboard plus eigene WPM/Genauigkeit. Falsche Tasten blockiere
 
 - German-speaking users; UI text in German.
 - Designed for 2–4 players, supports up to 8.
-- The host is always a player (auto-joins on connect, default nickname "Host"); the host's session is the server — if it ends, the game ends for everyone.
+- The host is the first player (joins via the normal dialog, no auto-join); the UI shows "(Host)" after the name. If the host's session ends, the next player in join order is promoted to host.
 - Finger correctness is intentionally NOT scored — a standard keyboard reports the key, not the finger (unmeasurable). The Finger-Hinweis is a pure visual learning aid.

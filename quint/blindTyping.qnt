@@ -8,10 +8,12 @@ module blindTyping {
   const TEXTS: Set[List[str]]
   const KEYS: Set[str]
   const NICKNAMES: Set[str]
-  const HOST_NICK: str
 
   // ---- Types ----
-  type Phase = Lobby | Round | Results
+  // Lebenszyklus: WaitingForNewSession -> Lobby -> Round -> Results ->
+  //  WaitingForNewSession -> ...  Ein laufendes Spiel (Round/Results) kann
+  //  nicht mehr betreten werden: "kein Join in ein laufendes Spiel".
+  type Phase = WaitingForNewSession | Lobby | Round | Results
 
   type PlayerState = {
     nickname: str,
@@ -62,6 +64,12 @@ module blindTyping {
   pure def startHolder(s: EngineState): int =
     if (s.joinQueue.length() == 0) -1 else s.joinQueue.nth(0)
 
+  // Host-Flag für die UI: Der Host (erster Spieler) wird mit dem Suffix
+  //  "(Host)" hinter seinem Namen angezeigt. Quint kann Strings nicht
+  //  konkatenieren, daher liefert das Modell nur das Flag; die UI leitet
+  //  daraus nickname + " (Host)" ab. Gespeichert wird nur der Nickname.
+  pure def isHost(pid: int): bool = pid == HOST
+
   // ---- State variable ----
   var state: EngineState
 
@@ -99,6 +107,7 @@ module blindTyping {
     state.phase != Results or state.timeRemaining == 0
 
   // ---- Witnesses ----
+  val reachedWaiting: bool = state.phase == WaitingForNewSession
   val reachedRound: bool = state.phase == Round
   val reachedResults: bool = state.phase == Results
   val someError: bool = state.players.keys().exists(k => state.players.get(k).errors > 0)
@@ -108,13 +117,17 @@ module blindTyping {
   val soloRound: bool = state.phase == Round and state.players.keys().size() == 1
   val rotation: bool =
     state.roundStarters.length() >= 2 and state.roundStarters.nth(0) != state.roundStarters.nth(1)
-  // Indikatoren für leere Runden/Results (defensiv; mit Host-Auto-Join 0% erwartet):
+  // Indikatoren für leere Runden/Results (defensiv; ohne Host-Auto-Join selten,
+  //  aber möglich, wenn alle während einer Runde verlassen):
   val emptyRound: bool = state.phase == Round and state.players.keys().size() == 0
   val emptyResults: bool = state.phase == Results and state.players.keys().size() == 0
 
   // ---- Actions ----
+  // Beitritt ist nur OHNE laufendes Spiel möglich (Waiting/Lobby), nicht in
+  //  Round/Results. Der Host ist nicht vorgegeben: Er ist der Erste, der
+  //  beitritt, und durchläuft denselben Dialog wie alle anderen.
   pure def canJoin(s: EngineState, pid: int, nickname: str): bool = and {
-    s.phase == Lobby,
+    or { s.phase == WaitingForNewSession, s.phase == Lobby },
     not(pid.in(s.players.keys())),
     s.players.keys().size() < MAX_PLAYERS,
   }
@@ -127,7 +140,20 @@ module blindTyping {
     state' = applyJoin(state, pid, nickname),
   }
 
-  // Dauer wählt nur der Host (Kaller-Check; Host ist immer Spieler).
+  // Neue Session starten: nur der Host, aus dem Warten heraus. Spieler und
+  //  Queue bleiben erhalten (Carry-over); es wird nur die Phase gewechselt.
+  pure def canStartSession(s: EngineState, pid: int): bool = and {
+    s.phase == WaitingForNewSession,
+    pid == HOST,
+    HOST.in(s.players.keys()),
+  }
+  pure def applyStartSession(s: EngineState): EngineState = {...s, phase: Lobby}
+  action startSession(pid: int): bool = all {
+    canStartSession(state, pid),
+    state' = applyStartSession(state),
+  }
+
+  // Dauer wählt nur der Host (Kaller-Check).
   pure def canSetDuration(s: EngineState, pid: int, d: int): bool = and {
     s.phase == Lobby,
     pid == HOST,
@@ -205,25 +231,26 @@ module blindTyping {
     state' = applyDisconnect(state, pid),
   }
 
-  // Nach einer Runde zurück in die Lobby; Start-Recht rotiert (Kopf -> Ende).
-  pure def canBackToLobby(s: EngineState): bool = s.phase == Results and s.joinQueue.length() >= 1
-  pure def applyBackToLobby(s: EngineState): EngineState = {
+  // Session beenden: nach den Results zurück ins Warten. Spieler und Queue
+  //  bleiben erhalten (Carry-over); Start-Recht rotiert (Kopf -> Ende).
+  pure def canEndSession(s: EngineState): bool = s.phase == Results
+  pure def applyEndSession(s: EngineState): EngineState = {
     val q = s.joinQueue
     val q2 = if (q.length() == 0) q else q.tail().append(q.head())
-    {...s, phase: Lobby, timeRemaining: 0, joinQueue: q2}
+    {...s, phase: WaitingForNewSession, timeRemaining: 0, joinQueue: q2}
   }
-  action backToLobby = all {
-    canBackToLobby(state),
-    state' = applyBackToLobby(state),
+  action endSession = all {
+    canEndSession(state),
+    state' = applyEndSession(state),
   }
-
 
   // ---- Init ----
-  // Host spielt immer (Spec-Regel): auto-join bei Verbindung.
+  // Kein vorgegebener Host: Das Spiel startet im Warten OHNE Spieler. Der
+  //  Host ist der Erste, der beitritt (gleicher Dialog wie alle anderen).
   action init = state' = {
-    phase: Lobby,
-    players: Map(HOST -> { nickname: HOST_NICK, cursor: 0, correct: 0, errors: 0 }),
-    joinQueue: List(HOST),
+    phase: WaitingForNewSession,
+    players: Map(),
+    joinQueue: List(),
     roundDuration: DEFAULT_DURATION,
     timeRemaining: 0,
     roundText: List(),
@@ -240,13 +267,14 @@ module blindTyping {
     nondet nick = NICKNAMES.oneOf()
     any {
       join(pid, nick),
+      startSession(pid),
       setDuration(pid, dur),
       startRound(pid, text),
       tick,
       roundEnd,
       keystroke(pid, key),
       disconnect(pid),
-      backToLobby,
+      endSession,
     }
   }
 }

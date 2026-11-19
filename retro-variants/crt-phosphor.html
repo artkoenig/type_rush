@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Blind-Tippen – CRT Phosphor</title>
+<style>
+:root {
+  --bg: #0a0f0a;
+  --phosphor: #33ff33;
+  --phosphor-dim: #1a881a;
+  --phosphor-bright: #66ff66;
+  --phosphor-glow: rgba(51, 255, 51, 0.3);
+  --error: #ff3333;
+  --error-glow: rgba(255, 51, 51, 0.3);
+  --card: rgba(51, 255, 51, 0.05);
+  --border: rgba(51, 255, 51, 0.3);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--phosphor);
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+/* CRT curvature + vignette */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.4) 100%);
+  pointer-events: none;
+  z-index: 9998;
+}
+/* Scanlines */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.2) 1px,
+    rgba(0, 0, 0, 0.2) 3px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+#app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+h1 {
+  font-size: 1.3rem;
+  margin: 0;
+  text-align: center;
+  text-shadow: 0 0 8px var(--phosphor-glow), 0 0 16px var(--phosphor-glow);
+  letter-spacing: 0.2em;
+}
+h2, h3 {
+  font-size: 0.8rem;
+  margin: 0;
+  color: var(--phosphor-dim);
+  letter-spacing: 0.1em;
+}
+.timer {
+  font-size: clamp(2rem, 8vw, 3.5rem);
+  font-weight: 700;
+  text-align: center;
+  text-shadow: 0 0 10px var(--phosphor-glow), 0 0 20px var(--phosphor-glow);
+  font-variant-numeric: tabular-nums;
+}
+.text {
+  font-size: clamp(1rem, 3vw, 1.5rem);
+  line-height: 2;
+  text-align: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 20px;
+  word-break: break-word;
+  text-shadow: 0 0 4px var(--phosphor-glow);
+}
+.char.typed { color: var(--phosphor-dim); }
+.char.next {
+  background: var(--phosphor);
+  color: #0a0f0a;
+  box-shadow: 0 0 8px var(--phosphor-glow);
+  animation: blink 1s step-end infinite;
+}
+.char.error {
+  background: var(--error);
+  color: #0a0f0a;
+  box-shadow: 0 0 8px var(--error-glow);
+}
+@keyframes blink {
+  50% { opacity: 0.6; }
+}
+.keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+}
+.kb-row { display: flex; gap: 4px; }
+.key {
+  width: clamp(24px, 7vw, 44px);
+  height: clamp(32px, 9vw, 52px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  font-size: clamp(0.7rem, 2.2vw, 1rem);
+  color: var(--phosphor-dim);
+}
+.key-space { width: clamp(120px, 55vw, 260px); }
+.key-finger { color: var(--phosphor); border-color: var(--phosphor); }
+.key-next {
+  background: var(--phosphor);
+  color: #0a0f0a;
+  box-shadow: 0 0 12px var(--phosphor-glow);
+}
+.hint {
+  text-align: center;
+  color: var(--phosphor-dim);
+  margin: 0;
+  font-size: 0.8rem;
+}
+.bottom {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.stats {
+  display: flex;
+  gap: 24px;
+  align-items: baseline;
+}
+.stat-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  text-shadow: 0 0 8px var(--phosphor-glow);
+}
+.stat span:last-child {
+  color: var(--phosphor-dim);
+  font-size: 0.8rem;
+}
+.board {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+.board li {
+  display: flex;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+}
+.board .rank { color: var(--phosphor-dim); width: 2em; }
+.board .nick { flex: 1; }
+.board .wertung { font-variant-numeric: tabular-nums; }
+.board li.me { border-color: var(--phosphor-bright); box-shadow: 0 0 6px var(--phosphor-glow); }
+.board li.winner .nick::after { content: " ★"; color: var(--phosphor-bright); }
+.players {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.players li {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+}
+.players li.me { border-color: var(--phosphor-bright); }
+.controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.durations { display: flex; gap: 8px; }
+.btn {
+  background: var(--card);
+  color: var(--phosphor);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.btn:hover {
+  background: rgba(51, 255, 51, 0.1);
+  box-shadow: 0 0 8px var(--phosphor-glow);
+}
+.btn.active { border-color: var(--phosphor); color: var(--phosphor-bright); }
+.btn.primary {
+  background: var(--phosphor);
+  color: #0a0f0a;
+  border: none;
+  font-weight: 700;
+  box-shadow: 0 0 12px var(--phosphor-glow);
+}
+.waiting, .disconnected {
+  color: var(--phosphor-dim);
+  text-align: center;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 10, 5, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.overlay-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(90vw, 380px);
+}
+.row { display: flex; gap: 8px; }
+.nickname {
+  flex: 1;
+  background: var(--bg);
+  color: var(--phosphor);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 1rem;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>▸ BLIND-TIPPEN ◂</h1>
+  <div class="timer">1:30</div>
+  <div class="text">
+    <span class="char typed">D</span><span class="char typed">a</span><span class="char typed">s</span><span class="char typed"> </span><span class="char typed">T</span><span class="char next">i</span><span class="char">p</span><span class="char">p</span><span class="char">e</span><span class="char">n</span><span class="char"> </span><span class="char">i</span><span class="char">s</span><span class="char">t</span><span class="char"> </span><span class="char">k</span><span class="char">e</span><span class="char">i</span><span class="char">n</span><span class="char"> </span><span class="char">S</span><span class="char">p</span><span class="char">a</span><span class="char">s</span><span class="char">s</span><span class="char"> </span><span class="char">f</span><span class="char">ü</span><span class="char">r</span><span class="char"> </span><span class="char">d</span><span class="char">i</span><span class="char">e</span><span class="char"> </span><span class="char">F</span><span class="char">u</span><span class="char">n</span><span class="char">k</span><span class="char">t</span><span class="char">i</span><span class="char">o</span><span class="char">n</span><span class="char">s</span><span class="char">t</span><span class="char">a</span><span class="char">r</span><span class="char">t</span>
+  </div>
+  <div class="keyboard">
+    <div class="kb-row">
+      <div class="key key-finger">Q</div><div class="key key-finger">W</div><div class="key key-finger">E</div><div class="key key-finger">R</div><div class="key key-finger">T</div><div class="key key-finger">Z</div><div class="key key-finger">U</div><div class="key key-finger">I</div><div class="key key-finger">O</div><div class="key key-finger">P</div>
+    </div>
+    <div class="kb-row">
+      <div class="key key-finger">A</div><div class="key key-finger">S</div><div class="key key-finger">D</div><div class="key key-next">F</div><div class="key key-finger">G</div><div class="key key-finger">H</div><div class="key key-finger">J</div><div class="key key-finger">K</div><div class="key key-finger">L</div>
+    </div>
+    <div class="kb-row">
+      <div class="key key-finger">Y</div><div class="key key-finger">X</div><div class="key key-finger">C</div><div class="key key-finger">V</div><div class="key key-finger">B</div><div class="key key-finger">N</div><div class="key key-finger">M</div>
+    </div>
+    <div class="kb-row">
+      <div class="key key-space key-finger">LEER</div>
+    </div>
+  </div>
+  <p class="hint">[ Zeigefinger rechts ]</p>
+  <div class="bottom">
+    <div class="stats">
+      <div class="stat"><span class="stat-value">52</span> <span>WPM</span></div>
+      <div class="stat"><span class="stat-value">94%</span> <span>TREFFER</span></div>
+    </div>
+    <div>
+      <h3>RANGLISTE</h3>
+      <ol class="board">
+        <li class="me"><span class="rank">1.</span><span class="nick">MegaTyper</span><span class="wertung">1580</span></li>
+        <li><span class="rank">2.</span><span class="nick">PixelPete</span><span class="wertung">1320</span></li>
+        <li><span class="rank">3.</span><span class="nick">ByteBea</span><span class="wertung">990</span></li>
+      </ol>
+    </div>
+  </div>
+</div>
+</body>
+</html>
