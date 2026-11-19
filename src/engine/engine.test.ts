@@ -595,6 +595,13 @@ describe("disconnect", () => {
     expect(after.state.winnerId).toBeNull();
     expect(last(after.snapshots).phase).toBe("results");
   });
+
+  it("sets startRight to null when the sole player (holding startRight) disconnects from the lobby", () => {
+    const { clock } = makeClock(0);
+    const { state } = run(createGame("host"), [{ type: "disconnect", playerId: "host" }], clock);
+    expect(state.players).toEqual([]);
+    expect(state.startRight).toBeNull();
+  });
 });
 
 describe("back to lobby and Start-Recht rotation", () => {

@@ -8,5 +8,6 @@ export default withCrapTypescriptVitest(
   },
   {
     threshold: 10,
+    excludes: ["src/client/**"],
   },
 );

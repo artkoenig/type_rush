@@ -8,6 +8,7 @@ import {
   type Actions,
 } from "./views.js";
 import { el } from "./dom.js";
+import { showNicknamePrompt } from "./nickname.js";
 
 function requireApp(): HTMLElement {
   const app = document.getElementById("app");
@@ -50,7 +51,10 @@ ws.onmessage = (event: MessageEvent) => {
     if (obj.isHost === true) {
       joined = true;
     } else {
-      promptNickname();
+      showNicknamePrompt((nickname) => {
+        send({ type: "join", nickname });
+        joined = true;
+      });
     }
     return;
   }
@@ -90,43 +94,6 @@ function handleSnapshot(snap: Snapshot): void {
       renderResults(app, snap, myId, actions);
       break;
   }
-}
-
-/** Overlay asking for a nickname; every non-host must join before playing. */
-function promptNickname(): void {
-  const overlay = document.createElement("div");
-  overlay.className = "overlay";
-
-  const input = document.createElement("input");
-  input.className = "nickname";
-  input.maxLength = 20;
-  input.placeholder = "Dein Name";
-
-  const submit = () => {
-    send({ type: "join", nickname: input.value.trim() || "Spieler" });
-    joined = true;
-    overlay.remove();
-  };
-
-  const button = document.createElement("button");
-  button.className = "btn primary";
-  button.textContent = "Los geht's";
-  button.addEventListener("click", submit);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") submit();
-  });
-
-  const row = document.createElement("div");
-  row.className = "row";
-  row.append(input, button);
-
-  const box = document.createElement("div");
-  box.className = "overlay-box";
-  box.append(el("h1", {}, "Blind-Tippen"), el("p", {}, "Wie sollen wir dich nennen?"), row);
-
-  overlay.append(box);
-  app.append(overlay);
-  input.focus();
 }
 
 document.addEventListener("keydown", (e: KeyboardEvent) => {
