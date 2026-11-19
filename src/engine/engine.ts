@@ -271,7 +271,7 @@ function liveElapsed(state: GameState): number {
   return Math.max(1, state.duration - state.timeRemaining);
 }
 
-function toSnapshot(state: GameState): Snapshot {
+export function toSnapshot(state: GameState): Snapshot {
   const elapsed =
     state.phase === "round" ? liveElapsed(state) : state.phase === "results" ? state.duration : 0;
   const ordered =

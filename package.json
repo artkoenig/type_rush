@@ -16,6 +16,7 @@
     "@barney-media/crap-typescript-vitest": "^2.0.2",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
     "@vitest/coverage-v8": "^5.1.1",
     "eslint": "^10.15.0",
     "husky": "^9.1.7",
@@ -34,5 +35,8 @@
       "eslint --fix",
       "prettier --write"
     ]
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
   }
 }
