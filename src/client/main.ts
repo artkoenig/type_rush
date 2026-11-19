@@ -22,6 +22,8 @@ let myId: string | null = null;
 let joined = false;
 let lastSnapshot: Snapshot | null = null;
 let cursorAtKeystroke: number | null = null;
+/** Elapsed seconds frozen when the player finished the text, so the WPM stops counting. */
+let finishedElapsed: number | null = null;
 
 const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
 
@@ -74,9 +76,17 @@ function handleSnapshot(snap: Snapshot): void {
     case "lobby":
       renderLobby(app, snap, myId, actions);
       break;
-    case "round":
-      renderRound(app, snap, myId, error);
+    case "round": {
+      if (me !== undefined) {
+        if (me.cursor >= snap.text.length) {
+          if (finishedElapsed === null) finishedElapsed = snap.duration - snap.timeRemaining;
+        } else {
+          finishedElapsed = null; // new round, counting starts again
+        }
+      }
+      renderRound(app, snap, myId, error, finishedElapsed ?? snap.duration - snap.timeRemaining);
       break;
+    }
     case "results":
       renderResults(app, snap, myId, actions);
       break;
@@ -130,6 +140,7 @@ document.addEventListener("keydown", (e: KeyboardEvent) => {
   if (e.key.length !== 1) return;
   if (e.key === " ") e.preventDefault();
   const me = lastSnapshot.players.find((p) => p.id === myId);
+  if (me !== undefined && me.cursor >= lastSnapshot.text.length) return; // text finished
   cursorAtKeystroke = me?.cursor ?? null;
   send({ type: "keystroke", key: e.key });
 });

@@ -63,6 +63,7 @@ export function renderRound(
   snap: Snapshot,
   myId: string | null,
   error: boolean,
+  elapsed: number,
 ): void {
   const me = snap.players.find((p) => p.id === myId);
   const cursor = me?.cursor ?? 0;
@@ -83,7 +84,6 @@ export function renderRound(
   renderKeyboard(keyboard, nextKey);
   const hint = el("p", { class: "hint" }, nextKey ? fingerLabel(fingerFor(nextKey)) : "Fertig!");
 
-  const elapsed = snap.duration - snap.timeRemaining;
   const wpm = me && elapsed > 0 ? Math.round(me.correct / 5 / (elapsed / 60)) : 0;
   const accuracy = me && me.total > 0 ? Math.round((me.correct / me.total) * 100) : 100;
   const stats = el(
