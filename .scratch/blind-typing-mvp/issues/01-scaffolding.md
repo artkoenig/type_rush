@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `npm install` succeeds; `npm run build` compiles TypeScript without errors
 - [ ] `npm test` runs Vitest and passes a trivial smoke test
