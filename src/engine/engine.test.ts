@@ -589,4 +589,25 @@ describe("engine", () => {
     expect(snap.spectators).toHaveLength(1);
     expect(snap.spectators[0]).toEqual({ id: "p1", nickname: "Alice" });
   });
+
+  it("ends the round immediately when all players have typed the full text", () => {
+    const { clock, advance } = makeClock(0);
+    const text = "ab";
+    const lobby = multiLobbyGame(["host", "Host", true], ["p2", "Bob"]);
+    const { state } = run(lobby, [{ type: "start", playerId: "host", text }], clock);
+    advance(5);
+    const t1 = run(state, [{ type: "tick" }], clock).state;
+    // host types both chars correctly → cursor 2
+    const a1 = run(t1, [{ type: "keystroke", playerId: "host", key: "a" }], clock).state;
+    const a2 = run(a1, [{ type: "keystroke", playerId: "host", key: "b" }], clock).state;
+    expect(a2.phase).toBe("round"); // p2 hasn't started yet
+    // p2: correct "a", error "x", correct "b" → cursor 2, but 1 error
+    const a3 = run(a2, [{ type: "keystroke", playerId: "p2", key: "a" }], clock).state;
+    expect(a3.phase).toBe("round"); // p2 cursor=1, not done
+    const a4 = run(a3, [{ type: "keystroke", playerId: "p2", key: "x" }], clock).state;
+    expect(a4.phase).toBe("round"); // error, cursor still 1
+    const a5 = run(a4, [{ type: "keystroke", playerId: "p2", key: "b" }], clock).state;
+    expect(a5.phase).toBe("results"); // p2 cursor=2, all done!
+    expect(a5.winnerId).toBe("host"); // host: 2c/0e beats p2: 2c/1e
+  });
 });

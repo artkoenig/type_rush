@@ -240,6 +240,11 @@ function handleKeystroke(
     }
     return { ...p, errors: p.errors + 1, lastTypedAt: elapsed };
   });
+  const allDone = players.every((p) => p.cursor >= state.text.length);
+  if (allDone) {
+    const winner = rankPlayers(players, "results", state.duration)[0];
+    return { ...state, players, phase: "results", winnerId: winner?.id ?? null };
+  }
   return { ...state, players };
 }
 
