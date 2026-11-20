@@ -1,7 +1,7 @@
 // Deterministische Tests der Engine (quint test).
 // Deckt die seltene/sequenzielle Logik ab, die die Zufallssimulation
 // (quint run) nicht zuverlässig erreicht: Rotation, Finish-&-Warten,
-// Blockier-Semantik, Host-Verhalten.
+// Blockier-Semantik, Host-Verhalten, Zuschauer-Beitritt.
 // Hinweis: Quint 0.33.1 setzt nach `.fail()` den Zustand nicht fort
 // (QNT502 "Variable state not set") -> `.fail()` steht immer am
 // Kettenende; die Fortsetzung wird in einem separaten Test geprüft.
@@ -9,26 +9,37 @@
 // startet im Warten OHNE Spieler; der Host durchläuft denselben
 // Join-Dialog wie alle anderen -> Tests, die eine Runde starten,
 // beginnen mit `join(1, …)` + `startSession(1)`.
+// Hinweis: `join` fügt in ALLEN Phasen einen Zuschauer hinzu.
+// `startRound` macht aus allen Zuschauern die Spieler (Roster-Assembly).
 module blindTyping_test {
   // Direkter Import der Engine-Instanz (Quint-Imports sind nicht transitiv:
   // blindTyping_3 definiert keine eigenen Namen, nur die Instanzierung).
   import blindTyping(
     HOST = 1,
-    PLAYERS = Set(1, 2, 3, 4),
+    PIDS = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
     MAX_PLAYERS = 8,
     DURATIONS = Set(30, 60, 120),
     TEXTS = Set(List("a", "b", "c"), List("d", "e", "f", "g", "h")),
     KEYS = Set("a", "b", "c", "d", "e", "f", "g", "h", "x"),
-    NICKNAMES = Set("ann", "ben", "carl", "dora")
+    NICKNAMES = Set("ann", "ben", "carl", "dora", "eve", "fred", "gus", "hal", "ida", "joe")
   ).* from "./blindTyping"
 
   // Wertung (Spec-Formel): langsam+korrekt schlägt schnell+ungenau.
+  // p1: 2 korrekt, 0 Fehler -> Score 20. p2: 1 korrekt, 2 Fehler -> Score 6.
   run scoreSlowBeatsFastTest =
-    init.expect(
-      score({ nickname: "s", cursor: 10, correct: 10, errors: 0 }, 60) >
-      score({ nickname: "f", cursor: 12, correct: 12, errors: 6 }, 60))
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(startSession(1))
+      .then(startRound(1, List("d", "e", "f", "g", "h")))
+      .then(keystroke(1, "d"))
+      .then(keystroke(1, "e"))
+      .then(keystroke(2, "d"))
+      .then(keystroke(2, "x"))
+      .then(keystroke(2, "x"))
+      .expect(score(state, 1) > score(state, 2))
 
-  // Blockier-Semantik (ADR 0003): falsche Taste -> Error, Cursor bleibt.
+  // Blockier-Semantik (ADR 0003): falsche Taste -> Error, Cursor rückt.
   run blockingTest =
     init
       .then(join(1, "ann"))
@@ -37,7 +48,7 @@ module blindTyping_test {
       .then(keystroke(1, "x"))
       .expect(and {
         state.players.get(1).errors == 1,
-        state.players.get(1).cursor == 0,
+        state.players.get(1).cursor == 1,
         state.players.get(1).correct == 0,
       })
 
@@ -68,7 +79,7 @@ module blindTyping_test {
       .then(keystroke(1, "a").fail())
 
   // Finish & Warten (Gap-Answer 2), Teil 2: Wertung bleibt fixiert,
-  // Runde läuft normal zu Ende. (3c/0e, 60s -> 100*27/(9*60) = 5)
+  // Runde läuft normal zu Ende. (3c/0e -> 3*10 - 0*2 = 30)
   run finishScoreFixedTest =
     init
       .then(join(1, "ann"))
@@ -83,24 +94,29 @@ module blindTyping_test {
         state.phase == Results,
         state.players.get(1).correct == 3,
         state.players.get(1).errors == 0,
-        score(state.players.get(1), 60) == 5,
+        score(state, 1) == 30,
       })
 
   // Start-Recht rotiert nach jeder Session (Kopf -> Ende der Queue).
+  // Solo-Szenario: deterministisch (einziger connected Pid = Host).
   run rotationTest =
     init
       .then(join(1, "ann"))
-      .then(join(2, "ben"))
       .then(startSession(1))
       .then(startRound(1, List("a", "b", "c")))
       .then(60.reps(i => tick))
       .then(roundEnd)
       .then(endSession)
+      .expect(and {
+        state.phase == WaitingForNewSession,
+        state.queueHead == 1,
+        state.spectators.keys() == Set(1),
+      })
       .then(startSession(1))
-      .then(startRound(2, List("d", "e", "f", "g", "h")))
+      .then(startRound(1, List("d", "e", "f", "g", "h")))
       .expect(and {
         state.roundNumber == 2,
-        state.roundStarters == List(1, 2),
+        state.phase == Round,
       })
 
   // Solo-Zyklus: ein Spieler kann endlos Sessions drehen.
@@ -116,10 +132,11 @@ module blindTyping_test {
       .then(startRound(1, List("d", "e", "f", "g", "h")))
       .expect(and {
         state.roundNumber == 2,
-        state.roundStarters == List(1, 1),
+        state.phase == Round,
+        state.players.keys() == Set(1),
       })
 
-  // Host verlässt -> wird aus Spielern + Queue entfernt, Phase bleibt.
+  // Host verlässt -> wird aus Spielern entfernt, Phase bleibt Round.
   // Nicht-Host-Spieler bleibt in der Liste, Runde läuft weiter.
   run hostLeaveRemovesTest =
     init
@@ -131,40 +148,62 @@ module blindTyping_test {
       .expect(and {
         state.phase == Round,
         state.players.keys() == Set(2),
+        state.queueHead == NO_PID,
       })
 
-  // Nicht-Host verlässt -> aus Spielern + Queue entfernt, Phase bleibt.
+  // Nicht-Host verlässt -> aus spectators entfernt, queueHead bleibt.
   run disconnectRemovesFromQueueTest =
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
       .then(disconnect(2))
       .expect(and {
-        state.joinQueue == List(1),
-        state.players.keys() == Set(1),
+        state.spectators.keys() == Set(1),
+        state.queueHead == 1,
         state.phase == WaitingForNewSession,
       })
 
-  // Beitritt ist nur OHNE laufendes Spiel möglich: in der Runde blockiert.
-  run joinBlockedInRoundTest =
+  // QueueHead verlässt -> queueHead wird NO_PID.
+  run disconnectQueueHeadTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(disconnect(1))
+      .expect(and {
+        state.spectators.keys() == Set(2),
+        state.queueHead == NO_PID,
+        state.phase == WaitingForNewSession,
+      })
+
+  // Beitritt ist in ALLEN Phasen möglich (Zuschauer-Beitritt, jederzeit).
+  // In der Runde: neuer Zuschauer, Spieler-Roster bleibt unverändert.
+  run joinInRoundSucceedsTest =
     init
       .then(join(1, "ann"))
       .then(startSession(1))
       .then(startRound(1, List("a", "b", "c")))
-      .then(join(2, "ben").fail())
+      .then(join(2, "ben"))
+      .expect(and {
+        state.spectators.keys() == Set(2),
+        state.players.keys() == Set(1),
+        state.phase == Round,
+      })
 
-  // Beitritt ist nur OHNE laufendes Spiel möglich: in den Results blockiert.
-  run joinBlockedInResultsTest =
+  // Beitritt in den Results: neuer Zuschauer, Results bleiben.
+  run joinInResultsSucceedsTest =
     init
       .then(join(1, "ann"))
       .then(startSession(1))
       .then(startRound(1, List("a", "b", "c")))
       .then(60.reps(i => tick))
       .then(roundEnd)
-      .then(join(2, "ben").fail())
+      .then(join(2, "ben"))
+      .expect(and {
+        state.spectators.keys() == Set(2),
+        state.phase == Results,
+      })
 
-  // Doppelte Teilnahme blockiert (hier: Nicht-Host; der Host ist derselbe
-  // Fall, sobald er einmal beigetreten ist).
+  // Doppelte Teilnahme blockiert (bereits connected -> join abgelehnt).
   run noDoubleJoinTest =
     init
       .then(join(2, "ben"))
@@ -187,14 +226,13 @@ module blindTyping_test {
       .then(setDuration(1, 30))
       .expect(state.roundDuration == 30)
 
-  // Host trägt eigenen Namen ein (gleicher Dialog wie alle anderen); das
-  // Modell liefert das Host-Flag, aus dem die UI "carl (Host)" ableitet
-  // (Quint kann Strings nicht konkatenieren).
+  // Host trägt eigenen Namen ein (gleicher Dialog wie alle anderen);
+  // erscheint als Zuschauer mit dem gewählten Nickname.
   run hostSetsOwnNameTest =
     init
       .then(join(1, "carl"))
       .expect(and {
-        state.players.get(1).nickname == "carl",
-        isHost(1),
+        state.spectators.get(1) == "carl",
+        isHost(state, 1),
       })
 }
