@@ -189,6 +189,21 @@ export function renderRound(
   );
 }
 
+export function renderLiveResults(app: HTMLElement, snap: Snapshot, myId: string | null): void {
+  app.replaceChildren(
+    el("h1", {}, "TYPE RUSH"),
+    el(
+      "div",
+      { class: "live-label" },
+      el("span", { class: "live-dot" }),
+      el("h2", {}, "Live-Ergebnis"),
+    ),
+    el("div", { class: "timer" }, formatTime(snap.timeRemaining)),
+    ranking(snap, myId),
+    spectatorList(snap, myId),
+  );
+}
+
 export function renderResults(
   app: HTMLElement,
   snap: Snapshot,

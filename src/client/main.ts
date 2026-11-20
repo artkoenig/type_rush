@@ -4,6 +4,7 @@ import {
   renderDisconnected,
   renderWaiting,
   renderLobby,
+  renderLiveResults,
   renderResults,
   renderRound,
   type Actions,
@@ -82,8 +83,8 @@ function handleSnapshot(snap: Snapshot): void {
       break;
     case "round": {
       if (meSpectator !== undefined && me === undefined) {
-        // Spectator view: show leaderboard but no typing UI
-        renderRound(app, snap, myId, false, 0);
+        // Spectator view: live results (leaderboard updates in real-time)
+        renderLiveResults(app, snap, myId);
       } else {
         renderRound(app, snap, myId, error, me?.typingElapsed ?? 0);
       }
