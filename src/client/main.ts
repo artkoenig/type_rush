@@ -67,6 +67,7 @@ ws.onclose = () => {
 function handleSnapshot(snap: Snapshot): void {
   lastSnapshot = snap;
   const me = snap.players.find((p) => p.id === myId);
+  const meSpectator = snap.spectators.find((s) => s.id === myId);
   let error = false;
   if (cursorAtKeystroke !== null && me !== undefined) {
     error = me.cursor === cursorAtKeystroke;
@@ -80,7 +81,12 @@ function handleSnapshot(snap: Snapshot): void {
       renderLobby(app, snap, myId, actions);
       break;
     case "round": {
-      renderRound(app, snap, myId, error, me?.typingElapsed ?? 0);
+      if (meSpectator !== undefined && me === undefined) {
+        // Spectator view: show leaderboard but no typing UI
+        renderRound(app, snap, myId, false, 0);
+      } else {
+        renderRound(app, snap, myId, error, me?.typingElapsed ?? 0);
+      }
       break;
     }
     case "results":
@@ -96,8 +102,9 @@ document.addEventListener("keydown", (e: KeyboardEvent) => {
   if (e.key.length !== 1) return;
   if (e.key === " ") e.preventDefault();
   const me = lastSnapshot.players.find((p) => p.id === myId);
-  if (me !== undefined && me.cursor >= lastSnapshot.text.length) return; // text finished
-  cursorAtKeystroke = me?.cursor ?? null;
+  if (me === undefined) return; // spectator: no typing
+  if (me.cursor >= lastSnapshot.text.length) return; // text finished
+  cursorAtKeystroke = me.cursor;
   send({ type: "keystroke", key: e.key });
 });
 

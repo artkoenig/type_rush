@@ -6,6 +6,7 @@ import {
   type Clock,
   type GameEvent,
   type GameState,
+  type PlayerState,
   type Snapshot,
 } from "./engine";
 
@@ -39,23 +40,30 @@ function run(
   return { state: current, snapshots };
 }
 
+/** A player with zeroed counters. */
+function mkPlayer(id: string, nickname: string, isHost = false): PlayerState {
+  return { id, nickname, isHost, correct: 0, errors: 0, cursor: 0, lastTypedAt: null };
+}
+
 /** A game with one player ("host") in the lobby, ready for a round. */
 function lobbyGame(): GameState {
   return {
     ...createGame(),
     phase: "lobby",
-    players: [
-      {
-        id: "host",
-        nickname: "Host",
-        isHost: true,
-        correct: 0,
-        errors: 0,
-        cursor: 0,
-        lastTypedAt: null,
-      },
-    ],
+    players: [mkPlayer("host", "Host", true)],
     startRight: "host",
+    hostId: "host",
+  };
+}
+
+/** A game with multiple players in the lobby (bypasses join → spectator). */
+function multiLobbyGame(...players: [string, string, boolean?][]): GameState {
+  return {
+    ...createGame(),
+    phase: "lobby",
+    players: players.map(([id, nick, host]) => mkPlayer(id, nick, host ?? false)),
+    startRight: players[0][0],
+    hostId: players.find(([_a, _b, h]) => h)?.[0] ?? players[0][0],
   };
 }
 
@@ -66,10 +74,12 @@ describe("engine", () => {
     const game = createGame();
     expect(game.phase).toBe("waiting");
     expect(game.players).toHaveLength(0);
+    expect(game.spectators).toHaveLength(0);
+    expect(game.hostId).toBeNull();
     expect(game.startRight).toBeNull();
   });
 
-  it("makes the first joiner the host and grants them the Start-Recht", () => {
+  it("makes the first joiner the host (spectator in waiting)", () => {
     const { clock } = makeClock();
     const { state } = run(
       createGame(),
@@ -80,8 +90,9 @@ describe("engine", () => {
       clock,
     );
     expect(state.phase).toBe("waiting");
-    expect(state.players.map((p) => p.isHost)).toEqual([true, false]);
-    expect(state.startRight).toBe("p1");
+    expect(state.players).toHaveLength(0); // all are spectators in waiting
+    expect(state.spectators).toHaveLength(2);
+    expect(state.hostId).toBe("p1");
   });
 
   it("rejects a second join from the same player", () => {
@@ -94,47 +105,64 @@ describe("engine", () => {
       ],
       clock,
     );
-    expect(state.players).toHaveLength(1);
+    expect(state.spectators).toHaveLength(1);
   });
 
-  it("caps the game at 8 players", () => {
+  it("assembles a roster from spectators on startSession (winner first, then join order)", () => {
     const { clock } = makeClock();
-    const joins = Array.from({ length: 9 }, (_, i) => ({
+    const { state } = run(
+      createGame(),
+      [
+        { type: "join", playerId: "p1", nickname: "Alice" },
+        { type: "join", playerId: "p2", nickname: "Bob" },
+        { type: "join", playerId: "p3", nickname: "Carol" },
+        { type: "startSession", playerId: "p1" },
+      ],
+      clock,
+    );
+    expect(state.phase).toBe("lobby");
+    expect(state.players).toHaveLength(3);
+    expect(state.players.map((p) => p.id)).toEqual(["p1", "p2", "p3"]);
+    expect(state.spectators).toHaveLength(0);
+    expect(state.startRight).toBe("p1");
+    expect(state.hostId).toBe("p1");
+  });
+
+  it("caps the roster at MAX_PLAYERS (8) during assembly", () => {
+    const { clock } = makeClock();
+    const joins: GameEvent[] = Array.from({ length: 10 }, (_, i) => ({
       type: "join" as const,
       playerId: `p${i}`,
       nickname: `P${i}`,
     }));
-    const { state } = run(createGame(), joins, clock);
+    const { state } = run(
+      createGame(),
+      [...joins, { type: "startSession", playerId: "p0" }],
+      clock,
+    );
     expect(state.players).toHaveLength(8);
+    expect(state.spectators).toHaveLength(2); // p8, p9 stay spectators
   });
 
   it("moves waiting → lobby only when the host starts the session", () => {
     const { clock } = makeClock();
-    const { state: afterNonHost } = run(
-      lobbyGame(),
+    const { state } = run(
+      createGame(),
       [
+        { type: "join", playerId: "p1", nickname: "Alice" },
         { type: "join", playerId: "p2", nickname: "Bob" },
-        { type: "startSession", playerId: "p2" },
+        { type: "startSession", playerId: "p2" }, // non-host: rejected
       ],
       clock,
     );
-    expect(afterNonHost.phase).toBe("lobby"); // non-host cannot start
-    const { state: afterHost } = run(
-      lobbyGame(),
-      [{ type: "startSession", playerId: "host" }],
-      clock,
-    );
-    expect(afterHost.phase).toBe("lobby"); // host in lobby: no-op, stays lobby
+    expect(state.phase).toBe("waiting"); // still waiting
   });
 
   it("starts a round only for the player holding the Start-Recht", () => {
     const { clock } = makeClock();
     const { state } = run(
       lobbyGame(),
-      [
-        { type: "startSession", playerId: "host" },
-        { type: "start", playerId: "someone-else", text: "hallo" },
-      ],
+      [{ type: "start", playerId: "someone-else", text: "hallo" }],
       clock,
     );
     expect(state.phase).toBe("lobby");
@@ -224,13 +252,9 @@ describe("engine", () => {
     const { clock, advance } = makeClock(0);
     const started = run(
       lobbyGame(),
-      [
-        { type: "start", playerId: "host", text: "hallo" },
-        { type: "setDuration", playerId: "host", duration: 60 },
-      ],
+      [{ type: "start", playerId: "host", text: "hallo" }],
       clock,
     ).state;
-    // Note: setDuration is lobby-only, so it is a no-op here; duration stays 60 from createGame.
     advance(30);
     const mid = run(started, [{ type: "tick" }], clock);
     expect(mid.state.phase).toBe("round");
@@ -258,7 +282,7 @@ describe("engine", () => {
     expect(inLobby.state.duration).toBe(120);
     const inWaiting = run(
       createGame(),
-      [{ type: "setDuration", playerId: "host", duration: 120 }],
+      [{ type: "setDuration", playerId: "p1", duration: 120 }],
       clock,
     );
     expect(inWaiting.state.duration).toBe(60); // rejected: not in lobby
@@ -277,14 +301,8 @@ describe("engine", () => {
   it("picks the highest-Wertung player as the winner when the round ends", () => {
     const { clock, advance } = makeClock(0);
     const text = "a".repeat(20);
-    const { state } = run(
-      lobbyGame(),
-      [
-        { type: "join", playerId: "p2", nickname: "Bob" },
-        { type: "start", playerId: "host", text },
-      ],
-      clock,
-    );
+    const lobby = multiLobbyGame(["host", "Host", true], ["p2", "Bob"]);
+    const { state } = run(lobby, [{ type: "start", playerId: "host", text }], clock);
     // host types 10 correct, p2 types 5 correct + 5 errors.
     const events: GameEvent[] = [
       ...Array.from({ length: 10 }, () => ({
@@ -310,24 +328,27 @@ describe("engine", () => {
     expect(end.state.winnerId).toBe("host");
   });
 
-  it("transitions results → waiting on endSession and rotates the Start-Recht", () => {
+  it("transitions results → waiting on endSession: players become spectators, startRight rotates", () => {
     const { clock, advance } = makeClock(0);
     const { state: lobby } = run(
-      lobbyGame(),
+      createGame(),
       [
+        { type: "join", playerId: "p1", nickname: "Alice" },
         { type: "join", playerId: "p2", nickname: "Bob" },
-        { type: "startSession", playerId: "host" },
+        { type: "startSession", playerId: "p1" },
       ],
       clock,
     );
-    const started = run(lobby, [{ type: "start", playerId: "host", text: "ab" }], clock).state;
+    expect(lobby.phase).toBe("lobby");
+    const started = run(lobby, [{ type: "start", playerId: "p1", text: "ab" }], clock).state;
     advance(60);
     const results = run(started, [{ type: "tick" }], clock).state;
     expect(results.phase).toBe("results");
-    const next = run(results, [{ type: "endSession", playerId: "p2" }], clock).state;
+    const next = run(results, [{ type: "endSession", playerId: "p1" }], clock).state;
     expect(next.phase).toBe("waiting");
-    expect(next.startRight).toBe("p2"); // rotated from host to the next player
-    expect(next.players[0]).toMatchObject({ correct: 0, errors: 0, cursor: 0, lastTypedAt: null });
+    expect(next.players).toHaveLength(0);
+    expect(next.spectators).toHaveLength(2); // both players → spectators
+    expect(next.startRight).toBe("p2"); // rotated from p1 to next
   });
 
   it("rejects endSession from a non-participant or outside the results phase", () => {
@@ -336,7 +357,7 @@ describe("engine", () => {
     expect(state.phase).toBe("lobby"); // not in results: rejected
   });
 
-  it("transfers the host role to the next player when the host disconnects", () => {
+  it("transfers the host role to the next spectator when the host disconnects in waiting", () => {
     const { clock } = makeClock();
     const { state } = run(
       createGame(),
@@ -347,9 +368,40 @@ describe("engine", () => {
       ],
       clock,
     );
-    expect(state.players.map((p) => p.isHost)).toEqual([true]); // p2 promoted to host
+    expect(state.hostId).toBe("p2");
+    expect(state.spectators).toHaveLength(1);
+    expect(state.spectators[0].id).toBe("p2");
+  });
+
+  it("removes a player from the roster on disconnect during a round (permanent for round)", () => {
+    const { clock } = makeClock();
+    const lobby = multiLobbyGame(["host", "Host", true], ["p2", "Bob"]);
+    const { state } = run(
+      lobby,
+      [
+        { type: "start", playerId: "host", text: "hallo" },
+        { type: "disconnect", playerId: "host" },
+      ],
+      clock,
+    );
+    expect(state.players).toHaveLength(1);
     expect(state.players[0].id).toBe("p2");
-    expect(state.players[0].isHost).toBe(true);
+    expect(state.phase).toBe("round"); // round continues
+  });
+
+  it("removes a spectator on disconnect", () => {
+    const { clock } = makeClock();
+    const { state } = run(
+      createGame(),
+      [
+        { type: "join", playerId: "p1", nickname: "Alice" },
+        { type: "join", playerId: "p2", nickname: "Bob" },
+        { type: "disconnect", playerId: "p2" },
+      ],
+      clock,
+    );
+    expect(state.spectators).toHaveLength(1);
+    expect(state.spectators[0].id).toBe("p1");
   });
 
   it("passes the Start-Recht to the first remaining player when its holder leaves the lobby", () => {
@@ -366,8 +418,7 @@ describe("engine", () => {
     );
     expect(state.startRight).toBe("p2");
   });
-
-  it("keeps results phase if the last remaining player leaves in the results (defensive)", () => {
+  it("collapses to waiting when the last player leaves in results", () => {
     const lonely: GameState = {
       ...createGame(),
       phase: "results",
@@ -383,11 +434,12 @@ describe("engine", () => {
         },
       ],
       startRight: "p1",
+      hostId: "p1",
       winnerId: "p1",
     };
     const { clock } = makeClock();
     const { state } = run(lonely, [{ type: "disconnect", playerId: "p1" }], clock);
-    expect(state.phase).toBe("results");
+    expect(state.phase).toBe("waiting");
     expect(state.players).toHaveLength(0);
     expect(state.winnerId).toBeNull();
   });
@@ -408,18 +460,10 @@ describe("engine", () => {
   it("orders players by Wertung descending in every round snapshot", () => {
     const { clock, advance } = makeClock(0);
     const text = "a".repeat(20);
-    const { state } = run(
-      lobbyGame(),
-      [
-        { type: "join", playerId: "p1", nickname: "Clean" },
-        { type: "join", playerId: "p2", nickname: "Sloppy" },
-        { type: "start", playerId: "host", text },
-      ],
-      clock,
-    );
-    // Advance time so elapsed > 0 when keystrokes are recorded.
+    const lobby = multiLobbyGame(["host", "Host", true], ["p1", "Clean"], ["p2", "Sloppy"]);
+    const { state } = run(lobby, [{ type: "start", playerId: "host", text }], clock);
     advance(10);
-    const ticked = run(state, [{ type: "tick" }], clock).state; // timeRemaining = 50
+    const ticked = run(state, [{ type: "tick" }], clock).state;
     const events: GameEvent[] = [
       ...Array.from({ length: 10 }, () => ({
         type: "keystroke" as const,
@@ -439,7 +483,6 @@ describe("engine", () => {
     ];
     const { snapshots } = run(ticked, events, clock);
     const snap = last(snapshots);
-    // p1: 10 correct, 0 errors, elapsed=10 → 100; p2: 12 correct, 6 errors, elapsed=10 → 53; host: 0
     expect(snap.players.map((p) => p.id)).toEqual(["p1", "p2", "host"]);
     expect(snap.players[0].wertung).toBeGreaterThan(snap.players[1].wertung);
   });
@@ -447,15 +490,8 @@ describe("engine", () => {
   it("rewards technique: slow+correct beats fast+inaccurate in the final results", () => {
     const { clock, advance } = makeClock(0);
     const text = "a".repeat(20);
-    const { state } = run(
-      lobbyGame(),
-      [
-        { type: "join", playerId: "p1", nickname: "Clean" },
-        { type: "join", playerId: "p2", nickname: "Sloppy" },
-        { type: "start", playerId: "host", text },
-      ],
-      clock,
-    );
+    const lobby = multiLobbyGame(["host", "Host", true], ["p1", "Clean"], ["p2", "Sloppy"]);
+    const { state } = run(lobby, [{ type: "start", playerId: "host", text }], clock);
     const events: GameEvent[] = [
       ...Array.from({ length: 10 }, () => ({
         type: "keystroke" as const,
@@ -489,10 +525,10 @@ describe("engine", () => {
   it("keeps a stable score for a player who has NOT finished across ticks", () => {
     const { clock, advance } = makeClock(0);
     const text = "a".repeat(20);
+    const lobby = multiLobbyGame(["host", "Host", true], ["p1", "Alice"]);
     const result = run(
-      lobbyGame(),
+      lobby,
       [
-        { type: "join", playerId: "p1", nickname: "Alice" },
         { type: "start", playerId: "host", text },
         ...Array.from({ length: 10 }, () => ({
           type: "keystroke" as const,
@@ -512,14 +548,8 @@ describe("engine", () => {
   it("keeps a stable score for a finished player across ticks (regression)", () => {
     const { clock, advance } = makeClock(0);
     const text = "hallo";
-    const { state } = run(
-      lobbyGame(),
-      [
-        { type: "join", playerId: "p1", nickname: "Alice" },
-        { type: "start", playerId: "host", text },
-      ],
-      clock,
-    );
+    const lobby = multiLobbyGame(["host", "Host", true], ["p1", "Alice"]);
+    const { state } = run(lobby, [{ type: "start", playerId: "host", text }], clock);
     const finishEvents: GameEvent[] = [
       { type: "keystroke", playerId: "p1", key: "h" },
       { type: "keystroke", playerId: "p1", key: "a" },
@@ -533,5 +563,30 @@ describe("engine", () => {
     const afterTick = run(afterFinish.state, [{ type: "tick" }], clock);
     const scoreAfterTick = last(afterTick.snapshots).players.find((p) => p.id === "p1")!.wertung;
     expect(scoreAfterTick).toBe(scoreAtFinish);
+  });
+
+  it("allows a spectator to join during a round (stays spectator)", () => {
+    const { clock } = makeClock();
+    const { state } = run(
+      lobbyGame(),
+      [
+        { type: "start", playerId: "host", text: "hallo" },
+        { type: "join", playerId: "p9", nickname: "Late" },
+      ],
+      clock,
+    );
+    expect(state.phase).toBe("round");
+    expect(state.spectators).toHaveLength(1);
+    expect(state.spectators[0].id).toBe("p9");
+    expect(state.players).toHaveLength(1); // roster unchanged
+  });
+
+  it("includes hostId and spectators in the snapshot", () => {
+    const { clock } = makeClock();
+    const join = step(createGame(), { type: "join", playerId: "p1", nickname: "Alice" }, clock);
+    const snap = join.snapshots[0];
+    expect(snap.hostId).toBe("p1");
+    expect(snap.spectators).toHaveLength(1);
+    expect(snap.spectators[0]).toEqual({ id: "p1", nickname: "Alice" });
   });
 });

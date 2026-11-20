@@ -20,12 +20,21 @@ export interface PlayerState {
   lastTypedAt: number | null;
 }
 
+export interface SpectatorState {
+  id: string;
+  nickname: string;
+}
+
 export interface GameState {
   phase: Phase;
-  /** Players in join order. */
+  /** Active players (the racing roster). Empty in the waiting phase. */
   players: PlayerState[];
+  /** Spectators: joined but not in the current roster. Unlimited. */
+  spectators: SpectatorState[];
   /** Player id holding the Start-Recht (null if no players). */
   startRight: string | null;
+  /** The host's id (first joiner; promoted on host disconnect). */
+  hostId: string | null;
   duration: Duration;
   /** Text all players type in the current/last round. */
   text: string;
@@ -60,12 +69,21 @@ export interface PlayerSnapshot {
   typingElapsed: number;
 }
 
+export interface SpectatorSnapshot {
+  id: string;
+  nickname: string;
+}
+
 /** Serializable view of the game state, emitted to all clients. */
 export interface Snapshot {
   phase: Phase;
-  /** Waiting/lobby: join order. Round/results: leaderboard by Wertung (descending). */
+  /** Waiting: empty. Lobby/round/results: the racing roster (ordered by Wertung in round/results). */
   players: PlayerSnapshot[];
+  /** Spectators watching (not in the current roster). */
+  spectators: SpectatorSnapshot[];
   startRight: string | null;
+  /** The host's id (for UI: who can start a session / set duration). */
+  hostId: string | null;
   duration: Duration;
   text: string;
   timeRemaining: number;
@@ -91,7 +109,9 @@ export function createGame(): GameState {
   return {
     phase: "waiting",
     players: [],
+    spectators: [],
     startRight: null,
+    hostId: null,
     duration: 60,
     text: "",
     timeRemaining: 0,
@@ -131,37 +151,47 @@ function apply(state: GameState, event: GameEvent, clock: Clock): GameState | nu
   }
 }
 
+/**
+ * Join is allowed in ALL phases (unlimited spectators).
+ * A participant is in exactly one of players/spectators.
+ * The first joiner becomes the host.
+ */
 function handleJoin(state: GameState, event: GameEvent & { type: "join" }): GameState | null {
-  if (state.phase !== "waiting" && state.phase !== "lobby") return null;
-  if (state.players.length >= MAX_PLAYERS) return null;
+  // No double-join (in either set).
   if (state.players.some((p) => p.id === event.playerId)) return null;
-  const isHost = state.players.length === 0; // first joiner is the host
-  const players = [
-    ...state.players,
-    {
-      id: event.playerId,
-      nickname: event.nickname,
-      isHost,
-      correct: 0,
-      errors: 0,
-      cursor: 0,
-      lastTypedAt: null,
-    },
-  ];
-  const startRight = state.startRight ?? (isHost ? event.playerId : null);
-  return { ...state, players, startRight };
+  if (state.spectators.some((s) => s.id === event.playerId)) return null;
+
+  const isHost = state.hostId === null; // first joiner is the host
+  const spectators = [...state.spectators, { id: event.playerId, nickname: event.nickname }];
+  return {
+    ...state,
+    spectators,
+    hostId: isHost ? event.playerId : state.hostId,
+  };
 }
 
+/**
+ * Waiting → Lobby: assembles the racing roster from spectators.
+ * Only the host can trigger this. The winner (if any) is always included.
+ * Roster is capped at MAX_PLAYERS; the rest stay as spectators.
+ */
 function handleStartSession(
   state: GameState,
   event: GameEvent & { type: "startSession" },
 ): GameState | null {
   if (state.phase !== "waiting") return null;
-  const player = state.players.find((p) => p.id === event.playerId);
-  if (player === undefined || !player.isHost) return null;
-  return { ...state, phase: "lobby" };
+  if (state.hostId !== event.playerId) return null;
+  if (state.spectators.length === 0) return null;
+
+  const { players, spectators } = assembleRoster(state);
+  const startRight = players.length > 0 ? players[0].id : null;
+  return { ...state, phase: "lobby", players, spectators, startRight };
 }
 
+/**
+ * Lobby → Round: starts the round. Only the start-right holder can trigger.
+ * Resets per-round counters for all players.
+ */
 function handleStart(
   state: GameState,
   event: GameEvent & { type: "start" },
@@ -224,39 +254,69 @@ function handleTick(state: GameState, clock: Clock): GameState | null {
   return { ...state, phase: "results", timeRemaining: 0, winnerId: winner?.id ?? null };
 }
 
-// If the host left, the new first player in join order becomes the host.
-function promoteNewHost(players: PlayerState[]): PlayerState[] {
-  if (players.length === 0) return players;
-  return players.map((p, i) => (i === 0 ? { ...p, isHost: true } : p));
-}
-
-function nextStartRight(players: PlayerState[]): string | null {
-  const first = players[0];
-  return first ? first.id : null;
-}
-
-function rankWinner(players: PlayerState[], duration: number): string | null {
-  const winner = rankPlayers(players, "results", duration)[0];
-  return winner ? winner.id : null;
-}
-
+/**
+ * Disconnect: removes the participant from players OR spectators.
+ * In the round phase, removal from players is permanent (they don't re-join the round).
+ * If the host disconnects, the next participant (first in join order) becomes host.
+ */
 function handleDisconnect(
   state: GameState,
   event: GameEvent & { type: "disconnect" },
 ): GameState | null {
-  const player = state.players.find((p) => p.id === event.playerId);
-  if (player === undefined) return null;
-  let players = state.players.filter((p) => p.id !== event.playerId);
-  if (player.isHost) players = promoteNewHost(players);
-  // Round: removed from round and leaderboard; the round runs to completion.
-  if (state.phase === "round") return { ...state, players };
-  if (state.phase === "results") {
-    return { ...state, players, winnerId: rankWinner(players, state.duration) };
+  const inPlayers = state.players.some((p) => p.id === event.playerId);
+  const inSpectators = state.spectators.some((s) => s.id === event.playerId);
+  if (!inPlayers && !inSpectators) return null;
+
+  let players = inPlayers ? state.players.filter((p) => p.id !== event.playerId) : state.players;
+  const spectators = inSpectators
+    ? state.spectators.filter((s) => s.id !== event.playerId)
+    : state.spectators;
+
+  // Host promotion: if the host left, the next participant (first in players, else first spectator) becomes host.
+  let hostId = state.hostId;
+  if (hostId === event.playerId) {
+    hostId = players.length > 0 ? players[0].id : spectators.length > 0 ? spectators[0].id : null;
+    if (hostId !== null) {
+      players = players.map((p, i) => (i === 0 ? { ...p, isHost: true } : { ...p, isHost: false }));
+    }
   }
-  // Waiting / lobby: if the leaver held the start right, it passes to the first remaining player.
-  const startRight =
-    state.startRight === event.playerId ? nextStartRight(players) : state.startRight;
-  return { ...state, players, startRight };
+
+  // Re-derive isHost flags (the first player is always the host if hostId matches).
+  if (hostId !== null) {
+    players = players.map((p) => ({ ...p, isHost: p.id === hostId }));
+  } else {
+    players = players.map((p) => ({ ...p, isHost: false }));
+  }
+
+  // Update startRight if the holder left.
+  let startRight = state.startRight;
+  if (startRight === event.playerId) {
+    startRight = players.length > 0 ? players[0].id : null;
+  }
+
+  // In results: re-rank winner if the winner left.
+  let winnerId = state.winnerId;
+  if (state.phase === "results" && winnerId === event.playerId) {
+    winnerId =
+      players.length > 0 ? (rankPlayers(players, "results", state.duration)[0]?.id ?? null) : null;
+  }
+
+  // If no players remain, collapse to waiting (avoids a stuck lobby/round/results).
+  if (players.length === 0 && state.phase !== "waiting") {
+    return {
+      ...state,
+      phase: "waiting",
+      players: [],
+      spectators,
+      hostId,
+      startRight: null,
+      text: "",
+      timeRemaining: 0,
+      winnerId: null,
+    };
+  }
+
+  return { ...state, players, spectators, hostId, startRight, winnerId };
 }
 
 function handleSetDuration(
@@ -264,48 +324,97 @@ function handleSetDuration(
   event: GameEvent & { type: "setDuration" },
 ): GameState | null {
   if (state.phase !== "lobby") return null;
-  const player = state.players.find((p) => p.id === event.playerId);
-  if (player === undefined || !player.isHost) return null;
+  if (state.hostId !== event.playerId) return null;
   if (!DURATIONS.includes(event.duration)) return null;
   return { ...state, duration: event.duration };
 }
 
+/**
+ * Results → Waiting: all players become spectators (nickname preserved).
+ * Start-Recht rotates to the next spectator in join order.
+ */
 function handleEndSession(
   state: GameState,
   event: GameEvent & { type: "endSession" },
 ): GameState | null {
   if (state.phase !== "results") return null;
-  if (!state.players.some((p) => p.id === event.playerId)) return null;
-  const players = state.players.map((p) => ({
-    ...p,
+  // The requester must be a participant (player or spectator).
+  const isParticipant =
+    state.players.some((p) => p.id === event.playerId) ||
+    state.spectators.some((s) => s.id === event.playerId);
+  if (!isParticipant) return null;
+
+  // All players become spectators (reset per-round counters).
+  const newSpectators: SpectatorState[] = [
+    ...state.players.map((p) => ({ id: p.id, nickname: p.nickname })),
+    ...state.spectators,
+  ];
+
+  // Rotate startRight among the new spectators (cyclic by join order).
+  let startRight: string | null = null;
+  if (newSpectators.length > 0) {
+    const holderIdx = state.startRight
+      ? newSpectators.findIndex((s) => s.id === state.startRight)
+      : -1;
+    const nextIdx = holderIdx >= 0 ? (holderIdx + 1) % newSpectators.length : 0;
+    startRight = newSpectators[nextIdx].id;
+  }
+
+  return {
+    ...state,
+    phase: "waiting",
+    players: [],
+    spectators: newSpectators,
+    startRight,
+    text: "",
+    timeRemaining: 0,
+    winnerId: null,
+  };
+}
+
+/**
+ * Assembles the racing roster from spectators for the lobby.
+ * The winner (if any) is always included. Remaining slots filled in join order.
+ * Capped at MAX_PLAYERS.
+ */
+function assembleRoster(state: GameState): {
+  players: PlayerState[];
+  spectators: SpectatorState[];
+} {
+  const selected: SpectatorState[] = [];
+  const remaining: SpectatorState[] = [];
+
+  // Winner is always included first.
+  const winnerSpec = state.winnerId
+    ? state.spectators.find((s) => s.id === state.winnerId)
+    : undefined;
+  if (winnerSpec !== undefined) {
+    selected.push(winnerSpec);
+  }
+
+  // Fill remaining slots in join order.
+  for (const s of state.spectators) {
+    if (selected.length >= MAX_PLAYERS) {
+      remaining.push(s);
+    } else if (!selected.some((x) => x.id === s.id)) {
+      selected.push(s);
+    } else {
+      remaining.push(s);
+    }
+  }
+
+  const hostId = state.hostId;
+  const players: PlayerState[] = selected.map((s) => ({
+    id: s.id,
+    nickname: s.nickname,
+    isHost: s.id === hostId,
     correct: 0,
     errors: 0,
     cursor: 0,
     lastTypedAt: null,
   }));
-  if (players.length === 0) {
-    return {
-      ...state,
-      phase: "waiting",
-      players,
-      startRight: null,
-      text: "",
-      timeRemaining: 0,
-      winnerId: null,
-    };
-  }
-  // Start-Recht rotates to the next player in join order (cyclic).
-  const holderIndex = players.findIndex((p) => p.id === state.startRight);
-  const next = players[(holderIndex + 1) % players.length];
-  return {
-    ...state,
-    phase: "waiting",
-    players,
-    startRight: next.id, // safe: results always has at least one player
-    text: "",
-    timeRemaining: 0,
-    winnerId: null,
-  };
+
+  return { players, spectators: remaining };
 }
 
 /**
@@ -346,7 +455,9 @@ export function toSnapshot(state: GameState): Snapshot {
         typingElapsed: p.lastTypedAt ?? 0,
       };
     }),
+    spectators: state.spectators.map((s) => ({ id: s.id, nickname: s.nickname })),
     startRight: state.startRight,
+    hostId: state.hostId,
     duration: state.duration,
     text: state.text,
     timeRemaining: state.timeRemaining,

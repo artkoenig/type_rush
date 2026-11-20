@@ -141,7 +141,7 @@ module blindTyping {
 
   // Runde starten: Host in Lobby. Roster = alle Zuschauer (∅ wenn keiner).
   pure def canStartRound(s: EngineState, pid: int, text: List[str]): bool =
-    s.phase == Lobby and isHost(s, pid) and text.in(TEXTS)
+    s.phase == Lobby and isHost(s, pid) and text.in(TEXTS) and s.spectators.keys().size() > 0
 
   pure def applyStartRound(s: EngineState, text: List[str]): EngineState = {
     ...s,
@@ -220,9 +220,15 @@ module blindTyping {
     queueHead: if (s.queueHead == pid) { NO_PID } else { s.queueHead }
   }
 
+  // Wenn nach Disconnect keine Spieler mehr und nicht in Waiting: collapse to Waiting.
+  pure def collapseIfEmpty(s: EngineState): EngineState =
+    if (s.players.keys().size() == 0 and s.phase != WaitingForNewSession) {
+      {...s, phase: WaitingForNewSession, players: Map(), queueHead: NO_PID, winner: NO_PID, timeRemaining: 0}
+    } else { s }
+
   action disconnect(pid: int): bool = all {
     canDisconnect(state, pid),
-    state' = applyDisconnect(state, pid),
+    state' = collapseIfEmpty(applyDisconnect(state, pid)),
   }
 
   // Session beenden: Results → Waiting, alle Spieler → Zuschauer, Rotation.

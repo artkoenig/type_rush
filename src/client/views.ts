@@ -12,6 +12,7 @@ export interface Actions {
 }
 
 function playerList(snap: Snapshot, myId: string | null): HTMLElement {
+  if (snap.players.length === 0) return el("span");
   return el(
     "ul",
     { class: "players" },
@@ -25,13 +26,33 @@ function playerList(snap: Snapshot, myId: string | null): HTMLElement {
   );
 }
 
+function spectatorList(snap: Snapshot, myId: string | null): HTMLElement {
+  if (snap.spectators.length === 0) return el("span");
+  return el(
+    "div",
+    { class: "spectators" },
+    el("h3", {}, "Zuschauer"),
+    el(
+      "ul",
+      { class: "spectators-list" },
+      ...snap.spectators.map((s) =>
+        el(
+          "li",
+          { class: s.id === myId ? "me" : "" },
+          `${s.nickname}${s.id === myId ? " (du)" : ""}`,
+        ),
+      ),
+    ),
+  );
+}
+
 export function renderWaiting(
   app: HTMLElement,
   snap: Snapshot,
   myId: string | null,
   actions: Actions,
 ): void {
-  const isHost = snap.players.find((p) => p.isHost)?.id === myId;
+  const isHost = snap.hostId === myId;
   const controls = el(
     "div",
     { class: "controls" },
@@ -46,7 +67,7 @@ export function renderWaiting(
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Warten auf neue Session"),
-    playerList(snap, myId),
+    spectatorList(snap, myId),
     controls,
   );
 }
@@ -57,7 +78,7 @@ export function renderLobby(
   myId: string | null,
   actions: Actions,
 ): void {
-  const isHost = snap.players.find((p) => p.isHost)?.id === myId;
+  const isHost = snap.hostId === myId;
   const holdsStart = snap.startRight === myId;
 
   const controls = el(
@@ -88,6 +109,7 @@ export function renderLobby(
     el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Lobby"),
     playerList(snap, myId),
+    spectatorList(snap, myId),
     controls,
   );
 }
@@ -162,6 +184,7 @@ export function renderRound(
       { class: "bottom" },
       stats,
       el("div", { class: "board-wrap" }, el("h3", {}, "Rangliste"), board),
+      spectatorList(snap, myId),
     ),
   );
 }
@@ -176,6 +199,7 @@ export function renderResults(
     el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Ergebnis"),
     ranking(snap, myId),
+    spectatorList(snap, myId),
     el(
       "button",
       { class: "btn primary", on: { click: () => actions.endSession() } },

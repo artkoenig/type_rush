@@ -235,4 +235,51 @@ module blindTyping_test {
         state.spectators.get(1) == "carl",
         isHost(state, 1),
       })
+  // --- Disconnect-Collapse-Tests ---
+
+  // Host disconnectet in Lobby (einziger Spieler) → Collapse zu Waiting.
+  run collapseInLobbyTest =
+    init
+      .then(join(1, "ann"))
+      .then(startSession(1))
+      .then(disconnect(1))
+      .expect(state.phase == WaitingForNewSession)
+
+  // Letzter Spieler disconnectet in Round → Collapse zu Waiting.
+  run collapseInRoundTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(startSession(1))
+      .then(startRound(1, List("a", "b", "c")))
+      .then(disconnect(1))
+      .then(disconnect(2))
+      .expect(state.phase == WaitingForNewSession)
+
+  // Letzter Spieler disconnectet in Results → Collapse zu Waiting.
+  run collapseInResultsTest =
+    init
+      .then(join(1, "ann"))
+      .then(startSession(1))
+      .then(startRound(1, List("a", "b", "c")))
+      .then(keystroke(1, "a"))
+      .then(keystroke(1, "a"))
+      .then(keystroke(1, "a"))
+      .then(roundEnd)
+      .then(disconnect(1))
+      .expect(state.phase == WaitingForNewSession)
+
+  // Zuschauer bleiben erhalten nach Collapse.
+  run collapseKeepsSpectatorsTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(join(3, "carl"))
+      .then(startSession(1))
+      .then(disconnect(1))
+      .then(disconnect(2))
+      .expect(and {
+        state.phase == WaitingForNewSession,
+        state.spectators.get(3) == "carl",
+      })
 }

@@ -38,6 +38,8 @@ describe("host connection", () => {
     const snap = host.last();
     expect(snap.phase).toBe("waiting");
     expect(snap.players).toHaveLength(0);
+    expect(snap.spectators).toHaveLength(0);
+    expect(snap.hostId).toBeNull();
   });
 
   it("greets every new connection with a hello message", () => {
@@ -58,12 +60,12 @@ describe("host connection", () => {
     const p2 = new FakeConn("p2");
     server.connect(p2);
     expect(p2.sent).toHaveLength(2);
-    expect(p2.last().players.map((p) => p.id)).toEqual(["h"]);
+    expect(p2.last().spectators.map((s) => s.id)).toEqual(["h"]);
   });
 });
 
 describe("join", () => {
-  it("adds the player and broadcasts to all clients", () => {
+  it("adds the spectator and broadcasts to all clients", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     const p2 = new FakeConn("p2");
@@ -71,9 +73,9 @@ describe("join", () => {
     server.connect(p2);
     send(host, server, { type: "join", nickname: "Host" });
     send(p2, server, { type: "join", nickname: "Bob" });
-    expect(host.last().players.map((p) => p.nickname)).toEqual(["Host", "Bob"]);
-    expect(p2.last().players.map((p) => p.nickname)).toEqual(["Host", "Bob"]);
-    expect(host.last().players[0].isHost).toBe(true);
+    expect(host.last().spectators.map((s) => s.nickname)).toEqual(["Host", "Bob"]);
+    expect(p2.last().spectators.map((s) => s.nickname)).toEqual(["Host", "Bob"]);
+    expect(host.last().hostId).toBe("h");
   });
 
   it("ignores invalid messages without broadcasting", () => {
@@ -91,13 +93,19 @@ describe("join", () => {
 });
 
 describe("startSession", () => {
-  it("moves the game from waiting to the lobby when the host triggers it", () => {
+  it("moves the game from waiting to the lobby and assembles the roster", () => {
     const { server } = setup();
     const host = new FakeConn("h");
+    const p2 = new FakeConn("p2");
     server.connect(host);
+    server.connect(p2);
     send(host, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
     send(host, server, { type: "startSession" });
-    expect(host.last().phase).toBe("lobby");
+    const snap = host.last();
+    expect(snap.phase).toBe("lobby");
+    expect(snap.players.map((p) => p.id)).toEqual(["h", "p2"]);
+    expect(snap.spectators).toHaveLength(0);
   });
 
   it("rejects a startSession by a non-host", () => {
@@ -205,7 +213,7 @@ describe("tick", () => {
 });
 
 describe("disconnect", () => {
-  it("promotes the next player to host when the host leaves", () => {
+  it("promotes the next spectator to host when the host leaves", () => {
     const { server } = setup();
     const host = new FakeConn("h");
     const p2 = new FakeConn("p2");
@@ -216,9 +224,9 @@ describe("disconnect", () => {
     server.disconnect(host);
     const snap = p2.last();
     expect(snap.phase).toBe("waiting");
-    expect(snap.players.map((p) => p.id)).toEqual(["p2"]);
-    expect(snap.players[0].isHost).toBe(true);
-    expect(snap.startRight).toBe("p2");
+    expect(snap.spectators.map((s) => s.id)).toEqual(["p2"]);
+    expect(snap.hostId).toBe("p2");
+    expect(snap.startRight).toBeNull();
   });
 
   it("removes a non-host from the round, which continues", () => {
@@ -328,6 +336,6 @@ describe("broadcast", () => {
     send(p3, server, { type: "join", nickname: "C" });
     expect(host.last()).toEqual(p2.last());
     expect(host.last()).toEqual(p3.last());
-    expect(host.last().players.map((p) => p.nickname)).toEqual(["Host", "C"]);
+    expect(host.last().spectators.map((s) => s.nickname)).toEqual(["Host", "C"]);
   });
 });
