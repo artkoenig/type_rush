@@ -1,12 +1,18 @@
 import { fingerFor, type Finger } from "../engine/fingerMap.js";
 import { el } from "./dom.js";
 
-/** QWERTZ layout, three rows. */
+/** Deutsches QWERTZ-Layout (DIN 2137): vier Reihen, Umlaute und ß an den echten Positionen. */
 const ROWS: string[][] = [
-  ["q", "w", "e", "r", "t", "z", "u", "i", "o", "p"],
-  ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
-  ["y", "x", "c", "v", "b", "n", "m"],
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "ß"],
+  ["q", "w", "e", "r", "t", "z", "u", "i", "o", "p", "ü"],
+  ["a", "s", "d", "f", "g", "h", "j", "k", "l", "ö", "ä"],
+  ["y", "x", "c", "v", "b", "n", "m", ";", ",", ".", "-"],
 ];
+
+/** Label: Buchstaben groß; ß bleibt klein (es gibt keinen großen ß, JS würde "SS" liefern). */
+function keyLabel(key: string): string {
+  return key === "ß" ? "ß" : key.toUpperCase();
+}
 
 const DIGIT_LABELS: Record<Finger["digit"], string> = {
   pinky: "kleiner Finger",
@@ -43,7 +49,7 @@ export function renderKeyboard(container: HTMLElement, nextKey: string | null): 
       const classes = ["key"];
       if (nextKey && key.toLowerCase() === nextKey.toLowerCase()) classes.push("key-next");
       else if (sameFinger(key)) classes.push("key-finger");
-      rowEl.append(el("span", { class: classes.join(" "), text: key.toUpperCase() }));
+      rowEl.append(el("span", { class: classes.join(" "), text: keyLabel(key) }));
     }
     container.append(rowEl);
   }

@@ -71,6 +71,19 @@
         position: relative;
         z-index: 1;
       }
+      /* Short views (waiting/lobby): title stays on top, the rest is
+         centered in the remaining space. Auto-margins collapse to 0 if
+         the content is taller than the viewport, so nothing gets clipped. */
+      #app.centered {
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
+      #app.centered > *:nth-child(2) {
+        margin-top: auto;
+      }
+      #app.centered > *:last-child {
+        margin-bottom: auto;
+      }
       h1 {
         font-size: 1.5rem;
         margin: 0;
@@ -310,6 +323,11 @@
         font-weight: 700;
         box-shadow: var(--glow-cyan);
       }
+      @media (max-width: 600px) {
+        .controls .btn.primary {
+          width: 100%;
+        }
+      }
       .waiting,
       .disconnected {
         color: var(--dim);
@@ -338,8 +356,13 @@
         display: flex;
         gap: 8px;
       }
+      .row button {
+        white-space: nowrap;
+        flex-shrink: 1;
+      }
       .nickname {
         flex: 1;
+        min-width: 0;
         background: var(--bg);
         color: var(--fg);
         border: 1px solid var(--border);

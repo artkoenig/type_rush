@@ -11,6 +11,10 @@ export interface Actions {
   endSession(): void;
 }
 
+function setCentered(app: HTMLElement, centered: boolean): void {
+  app.classList.toggle("centered", centered);
+}
+
 function playerList(snap: Snapshot, myId: string | null): HTMLElement {
   if (snap.players.length === 0) return el("span");
   return el(
@@ -26,8 +30,8 @@ function playerList(snap: Snapshot, myId: string | null): HTMLElement {
   );
 }
 
-function spectatorList(snap: Snapshot, myId: string | null): HTMLElement {
-  if (snap.spectators.length === 0) return el("span");
+function spectatorList(snap: Snapshot, myId: string | null): HTMLElement | DocumentFragment {
+  if (snap.spectators.length === 0) return document.createDocumentFragment();
   return el(
     "div",
     { class: "spectators" },
@@ -52,6 +56,7 @@ export function renderWaiting(
   myId: string | null,
   actions: Actions,
 ): void {
+  setCentered(app, true);
   const isHost = snap.hostId === myId;
   const controls = el(
     "div",
@@ -78,6 +83,7 @@ export function renderLobby(
   myId: string | null,
   actions: Actions,
 ): void {
+  setCentered(app, true);
   const isHost = snap.hostId === myId;
   const holdsStart = snap.startRight === myId;
 
@@ -121,6 +127,7 @@ export function renderRound(
   error: boolean,
   elapsed: number,
 ): void {
+  setCentered(app, false);
   const me = snap.players.find((p) => p.id === myId);
   const cursor = me?.cursor ?? 0;
   const nextKey = cursor < snap.text.length ? snap.text[cursor] : null;
@@ -190,6 +197,7 @@ export function renderRound(
 }
 
 export function renderLiveResults(app: HTMLElement, snap: Snapshot, myId: string | null): void {
+  setCentered(app, false);
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el(
@@ -210,6 +218,7 @@ export function renderResults(
   myId: string | null,
   actions: Actions,
 ): void {
+  setCentered(app, false);
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Ergebnis"),
@@ -240,6 +249,7 @@ function ranking(snap: Snapshot, myId: string | null): HTMLElement {
 }
 
 export function renderDisconnected(app: HTMLElement): void {
+  setCentered(app, false);
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el("p", { class: "disconnected" }, "Verbindung getrennt"),
