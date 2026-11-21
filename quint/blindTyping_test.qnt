@@ -1,28 +1,30 @@
 // Deterministische Tests der Engine (quint test).
 // Deckt die seltene/sequenzielle Logik ab, die die Zufallssimulation
-// (quint run) nicht zuverlässig erreicht: Rotation, Finish-&-Warten,
-// Blockier-Semantik, Host-Verhalten, Zuschauer-Beitritt.
+// (quint run) nicht zuverlässig erreicht: signUp, Timer, Countdown,
+// Auto-Start, Re-Anmeldung nach Results, Disconnect, Blockier-Semantik.
+//
+// Kurze Dauer-Konstanten (3/2/5) halten die Tests schnell. Standard-Preamble
+// (2 Spieler) bringt die Engine deterministisch in eine Runde:
+//   join x2 -> signUp x2 -> 3x tick (Lobby 3->0) -> startCountdown
+//   -> 2x tick (Countdown 2->0) -> startRound(text).
+//
 // Hinweis: Quint 0.33.1 setzt nach `.fail()` den Zustand nicht fort
-// (QNT502 "Variable state not set") -> `.fail()` steht immer am
-// Kettenende; die Fortsetzung wird in einem separaten Test geprüft.
-// Hinweis: Der Host (pid 1) ist nach `init` NICHT Spieler: Das Spiel
-// startet im Warten OHNE Spieler; der Host durchläuft denselben
-// Join-Dialog wie alle anderen -> Tests, die eine Runde starten,
-// beginnen mit `join(1, …)` + `startSession(1)`.
-// Hinweis: `join` fügt in ALLEN Phasen einen Zuschauer hinzu.
-// `startRound` macht aus allen Zuschauern die Spieler (Roster-Assembly).
+// (QNT502) -> `.fail()` steht immer am Kettenende.
+// Hinweis: `startRound(text)` und `roundEnd(w)` nehmen ihren Parameter aus
+// der Engine (step: nondet); Tests übergeben ihn explizit -> deterministisch.
 module blindTyping_test {
-  // Direkter Import der Engine-Instanz (Quint-Imports sind nicht transitiv:
-  // blindTyping_3 definiert keine eigenen Namen, nur die Instanzierung).
   import blindTyping(
-    HOST = 1,
     PIDS = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
     MAX_PLAYERS = 8,
-    DURATIONS = Set(30, 60, 120),
+    LOBBY_DURATION = 3,
+    COUNTDOWN_DURATION = 2,
+    ROUND_DURATION = 5,
     TEXTS = Set(List("a", "b", "c"), List("d", "e", "f", "g", "h")),
     KEYS = Set("a", "b", "c", "d", "e", "f", "g", "h", "x"),
     NICKNAMES = Set("ann", "ben", "carl", "dora", "eve", "fred", "gus", "hal", "ida", "joe")
   ).* from "./blindTyping"
+
+  // ---- Scoring / Blockier-Semantik ----
 
   // Wertung (Spec-Formel): langsam+korrekt schlägt schnell+ungenau.
   // p1: 2 korrekt, 0 Fehler -> Score 20. p2: 1 korrekt, 2 Fehler -> Score 6.
@@ -30,8 +32,12 @@ module blindTyping_test {
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
-      .then(startSession(1))
-      .then(startRound(1, List("d", "e", "f", "g", "h")))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("d", "e", "f", "g", "h")))
       .then(keystroke(1, "d"))
       .then(keystroke(1, "e"))
       .then(keystroke(2, "d"))
@@ -39,12 +45,17 @@ module blindTyping_test {
       .then(keystroke(2, "x"))
       .expect(score(state, 1) > score(state, 2))
 
-  // Blockier-Semantik (ADR 0003): falsche Taste -> Error, Cursor rückt.
+  // Falsche Taste -> Error, Cursor rückt, Correct bleibt.
   run blockingTest =
     init
       .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
       .then(keystroke(1, "x"))
       .expect(and {
         state.players.get(1).errors == 1,
@@ -56,8 +67,13 @@ module blindTyping_test {
   run correctKeystrokeTest =
     init
       .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
       .then(keystroke(1, "a"))
       .expect(and {
         state.players.get(1).cursor == 1,
@@ -65,31 +81,39 @@ module blindTyping_test {
         state.players.get(1).errors == 0,
       })
 
-  // Finish & Warten (Gap-Answer 2), Teil 1: nach Textende sind
-  // weitere Keystrokes blockiert.
+  // Nach Textende sind weitere Keystrokes blockiert (finished).
   run finishBlocksKeystrokeTest =
     init
       .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
       .then(keystroke(1, "a"))
       .then(keystroke(1, "b"))
       .then(keystroke(1, "c"))
       .expect(state.players.get(1).cursor == 3)
       .then(keystroke(1, "a").fail())
 
-  // Finish & Warten (Gap-Answer 2), Teil 2: Wertung bleibt fixiert,
-  // Runde läuft normal zu Ende. (3c/0e -> 3*10 - 0*2 = 30)
+  // Wertung bleibt nach Finish fixiert; Runde endet per Zeit. (3c/0e -> 30)
   run finishScoreFixedTest =
     init
       .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
       .then(keystroke(1, "a"))
       .then(keystroke(1, "b"))
       .then(keystroke(1, "c"))
-      .then(60.reps(i => tick))
-      .then(roundEnd)
+      .then(5.reps(i => tick))
+      .then(roundEnd(1))
       .expect(and {
         state.phase == Results,
         state.players.get(1).correct == 3,
@@ -97,95 +121,271 @@ module blindTyping_test {
         score(state, 1) == 30,
       })
 
-  // Start-Recht rotiert nach jeder Session (Kopf -> Ende der Queue).
-  // Solo-Szenario: deterministisch (einziger connected Pid = Host).
-  run rotationTest =
-    init
-      .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
-      .then(60.reps(i => tick))
-      .then(roundEnd)
-      .then(endSession)
-      .expect(and {
-        state.phase == WaitingForNewSession,
-        state.queueHead == 1,
-        state.spectators.keys() == Set(1),
-      })
-      .then(startSession(1))
-      .then(startRound(1, List("d", "e", "f", "g", "h")))
-      .expect(and {
-        state.roundNumber == 2,
-        state.phase == Round,
-      })
+  // ---- signUp ----
 
-  // Solo-Zyklus: ein Spieler kann endlos Sessions drehen.
-  run soloCycleTest =
+  // Zuschauer -> Spieler; Nickname wird übernommen.
+  run signUpMovesSpectatorToPlayerTest =
     init
       .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
-      .then(60.reps(i => tick))
-      .then(roundEnd)
-      .then(endSession)
-      .then(startSession(1))
-      .then(startRound(1, List("d", "e", "f", "g", "h")))
+      .then(signUp(1))
       .expect(and {
-        state.roundNumber == 2,
-        state.phase == Round,
         state.players.keys() == Set(1),
+        state.players.get(1).nickname == "ann",
+        state.spectators.keys() == Set(),
       })
 
-  // Host verlässt -> wird aus Spielern entfernt, Phase bleibt Round.
-  // Nicht-Host-Spieler bleibt in der Liste, Runde läuft weiter.
-  run hostLeaveRemovesTest =
+  // Volles Roster (8) -> 9. signUp blockiert.
+  run signUpBlockedWhenFullTest =
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
+      .then(join(3, "carl"))
+      .then(join(4, "dora"))
+      .then(join(5, "eve"))
+      .then(join(6, "fred"))
+      .then(join(7, "gus"))
+      .then(join(8, "hal"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(signUp(3))
+      .then(signUp(4))
+      .then(signUp(5))
+      .then(signUp(6))
+      .then(signUp(7))
+      .then(signUp(8))
+      .then(join(9, "ida"))
+      .then(signUp(9).fail())
+
+  // signUp nur in der Lobby (hier: in der Runde blockiert).
+  run signUpBlockedOutOfLobbyTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
+      .then(join(3, "carl"))
+      .then(signUp(3).fail())
+
+  // ---- Timer ----
+
+  // Erster Spieler startet den Timer: ein Tick zahlt ihn herunter.
+  run timerStartsOnFirstPlayerTest =
+    init
+      .then(join(1, "ann"))
+      .then(signUp(1))
+      .then(tick)
+      .expect(state.timeRemaining == LOBBY_DURATION - 1)
+
+  // Ohne Spieler tickt der Lobby-Timer nicht.
+  run timerIdleWithNoPlayersTest =
+    init
+      .then(tick.fail())
+
+  // Timer abgelaufen mit 1 Spieler -> zurücksetzen, Lobby wartet weiter.
+  run timerResetOnExpire1PlayerTest =
+    init
+      .then(join(1, "ann"))
+      .then(signUp(1))
+      .then(3.reps(i => tick))
+      .then(resetLobbyTimer)
+      .expect(and {
+        state.phase == Lobby,
+        state.timeRemaining == LOBBY_DURATION,
+      })
+
+  // ---- Countdown ----
+
+  // Volles Roster -> Countdown (unabhängig vom Timer).
+  run countdownOnFullRosterTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(join(3, "carl"))
+      .then(join(4, "dora"))
+      .then(join(5, "eve"))
+      .then(join(6, "fred"))
+      .then(join(7, "gus"))
+      .then(join(8, "hal"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(signUp(3))
+      .then(signUp(4))
+      .then(signUp(5))
+      .then(signUp(6))
+      .then(signUp(7))
+      .then(signUp(8))
+      .then(startCountdown)
+      .expect(and {
+        state.phase == Countdown,
+        state.timeRemaining == COUNTDOWN_DURATION,
+      })
+
+  // Timer abgelaufen mit >=2 Spielern -> Countdown.
+  run countdownOnTimerExpire2PlusTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .expect(and {
+        state.phase == Countdown,
+        state.timeRemaining == COUNTDOWN_DURATION,
+      })
+
+  // ---- Auto-Start ----
+
+  // Nach Countdown-Ende startet die Runde automatisch.
+  run autoStartRoundAfterCountdownTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
+      .expect(and {
+        state.phase == Round,
+        state.timeRemaining == ROUND_DURATION,
+        state.roundNumber == 1,
+      })
+
+  // ---- Results -> Lobby (Re-Anmeldung) ----
+
+  // Nach den Results werden Spieler wieder Zuschauer (müssen neu signUp).
+  run backToLobbyMakesSpectatorsTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
+      .then(keystroke(1, "a"))
+      .then(5.reps(i => tick))
+      .then(roundEnd(1))
+      .then(backToLobby)
+      .expect(and {
+        state.phase == Lobby,
+        state.players.keys() == Set(),
+        state.spectators.keys() == Set(1, 2),
+        state.winner == NO_PID,
+        state.timeRemaining == LOBBY_DURATION,
+      })
+
+  // Vollzyklus + Re-Anmeldung: nach Results kann neu signUp werden.
+  run reSignupAfterResultsTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
+      .then(keystroke(1, "a"))
+      .then(5.reps(i => tick))
+      .then(roundEnd(1))
+      .then(backToLobby)
+      .expect(state.spectators.keys() == Set(1, 2))
+      .then(signUp(1))
+      .expect(state.players.keys() == Set(1))
+
+  // ---- Disconnect ----
+
+  // Spieler verlässt in der Runde -> Roster schrumpft, Phase bleibt Round.
+  run disconnectInRoundTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
       .then(disconnect(1))
       .expect(and {
         state.phase == Round,
         state.players.keys() == Set(2),
-        state.queueHead == NO_PID,
       })
 
-  // Nicht-Host verlässt -> aus spectators entfernt, queueHead bleibt.
-  run disconnectRemovesFromQueueTest =
+  // Letzter Spieler verlässt in der Lobby -> Roster leer, Timer neu laden.
+  run disconnectInLobbyTest =
     init
       .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(disconnect(2))
-      .expect(and {
-        state.spectators.keys() == Set(1),
-        state.queueHead == 1,
-        state.phase == WaitingForNewSession,
-      })
-
-  // QueueHead verlässt -> queueHead wird NO_PID.
-  run disconnectQueueHeadTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
+      .then(signUp(1))
       .then(disconnect(1))
       .expect(and {
-        state.spectators.keys() == Set(2),
-        state.queueHead == NO_PID,
-        state.phase == WaitingForNewSession,
+        state.phase == Lobby,
+        state.players.keys() == Set(),
+        state.timeRemaining == LOBBY_DURATION,
       })
 
-  // Beitritt ist in ALLEN Phasen möglich (Zuschauer-Beitritt, jederzeit).
-  // In der Runde: neuer Zuschauer, Spieler-Roster bleibt unverändert.
+  // Zuschauer bleiben erhalten, wenn Spieler die Lobby verlassen.
+  run disconnectKeepsSpectatorsTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(join(3, "carl"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(disconnect(1))
+      .then(disconnect(2))
+      .expect(and {
+        state.phase == Lobby,
+        state.players.keys() == Set(),
+        state.spectators.get(3) == "carl",
+      })
+
+  // Winner verlässt in den Results -> winner wird NO_PID.
+  run disconnectInResultsTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
+      .then(keystroke(1, "a"))
+      .then(5.reps(i => tick))
+      .then(roundEnd(1))
+      .then(disconnect(1))
+      .expect(and {
+        state.phase == Results,
+        state.players.keys() == Set(2),
+        state.winner == NO_PID,
+      })
+
+  // ---- join ----
+
+  // Beitritt ist in ALLEN Phasen möglich (Zuschauer, jederzeit).
   run joinInRoundSucceedsTest =
     init
       .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
       .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
+      .then(join(3, "carl"))
       .expect(and {
-        state.spectators.keys() == Set(2),
-        state.players.keys() == Set(1),
+        state.spectators.keys() == Set(3),
+        state.players.keys() == Set(1, 2),
         state.phase == Round,
       })
 
@@ -193,13 +393,18 @@ module blindTyping_test {
   run joinInResultsSucceedsTest =
     init
       .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
-      .then(60.reps(i => tick))
-      .then(roundEnd)
       .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(3.reps(i => tick))
+      .then(startCountdown)
+      .then(2.reps(i => tick))
+      .then(startRound(List("a", "b", "c")))
+      .then(5.reps(i => tick))
+      .then(roundEnd(1))
+      .then(join(3, "carl"))
       .expect(and {
-        state.spectators.keys() == Set(2),
+        state.spectators.keys() == Set(3),
         state.phase == Results,
       })
 
@@ -209,77 +414,9 @@ module blindTyping_test {
       .then(join(2, "ben"))
       .then(join(2, "carl").fail())
 
-  // Dauer wählt nur der Host, Teil 1: Nicht-Host ist blockiert.
-  run durationNonHostBlockedTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(startSession(1))
-      .then(setDuration(2, 30).fail())
-
-  // Dauer wählt nur der Host, Teil 2: Host setzt die Dauer.
-  run durationHostSetsTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(startSession(1))
-      .then(setDuration(1, 30))
-      .expect(state.roundDuration == 30)
-
-  // Host trägt eigenen Namen ein (gleicher Dialog wie alle anderen);
-  // erscheint als Zuschauer mit dem gewählten Nickname.
-  run hostSetsOwnNameTest =
+  // Eigener Name wird beim Beitritt eingetragen.
+  run joinSetsOwnNameTest =
     init
       .then(join(1, "carl"))
-      .expect(and {
-        state.spectators.get(1) == "carl",
-        isHost(state, 1),
-      })
-  // --- Disconnect-Collapse-Tests ---
-
-  // Host disconnectet in Lobby (einziger Spieler) → Collapse zu Waiting.
-  run collapseInLobbyTest =
-    init
-      .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(disconnect(1))
-      .expect(state.phase == WaitingForNewSession)
-
-  // Letzter Spieler disconnectet in Round → Collapse zu Waiting.
-  run collapseInRoundTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
-      .then(disconnect(1))
-      .then(disconnect(2))
-      .expect(state.phase == WaitingForNewSession)
-
-  // Letzter Spieler disconnectet in Results → Collapse zu Waiting.
-  run collapseInResultsTest =
-    init
-      .then(join(1, "ann"))
-      .then(startSession(1))
-      .then(startRound(1, List("a", "b", "c")))
-      .then(keystroke(1, "a"))
-      .then(keystroke(1, "a"))
-      .then(keystroke(1, "a"))
-      .then(roundEnd)
-      .then(disconnect(1))
-      .expect(state.phase == WaitingForNewSession)
-
-  // Zuschauer bleiben erhalten nach Collapse.
-  run collapseKeepsSpectatorsTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(join(3, "carl"))
-      .then(startSession(1))
-      .then(disconnect(1))
-      .then(disconnect(2))
-      .expect(and {
-        state.phase == WaitingForNewSession,
-        state.spectators.get(3) == "carl",
-      })
+      .expect(state.spectators.get(1) == "carl")
 }
