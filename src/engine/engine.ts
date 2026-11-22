@@ -1,20 +1,19 @@
 import { calibrateText, type Duration } from "../content/textPool";
 
-/** Monotonic clock in seconds, injected by the caller (never wall-clock in tests). */
-export type Clock = () => number;
-
 /**
- * Phase cycle (hostless, auto-starting): lobby → countdown → round → results → lobby → …
- * There is no "waiting" phase and no host: the lobby is always open, and rounds start on their own.
+ * Phase cycle (hostless, auto-starting): lobby → countdown → round → lobby → …
+ *
+ * There is NO separate "results" phase. The highscore table ("results") is a
+ * client-side view over the lobby, backed by `lastRoundResults`. After every round
+ * all players become spectators and the game returns to the lobby on its own; each
+ * spectator then decides whether to sign up for the next round or keep watching.
  */
-export type Phase = "lobby" | "countdown" | "round" | "results";
+export type Phase = "lobby" | "countdown" | "round";
 
 /** Fixed phase durations, in seconds. */
 export const LOBBY_DURATION = 30;
 export const COUNTDOWN_DURATION = 5;
 export const ROUND_DURATION = 60;
-/** How long the results are displayed before the game returns to the lobby. */
-export const RESULTS_DURATION = 10;
 
 /** Maximum number of players in the racing roster. */
 export const MAX_PLAYERS = 8;
@@ -39,17 +38,22 @@ export interface SpectatorState {
 
 export interface GameState {
   phase: Phase;
-  /** Active players (the racing roster). */
+  /** Active players (the racing roster) of the current round. */
   players: PlayerState[];
-  /** Spectators: joined but not in the current roster. Unlimited. */
+  /** Spectators: joined but not in the current roster. Includes former players. */
   spectators: SpectatorState[];
-  /** Text all players type in the current/last round. */
+  /**
+   * The highscore table: the players of the most recently ENDED round, with their
+   * final scores. Fixed (it does not shrink when people leave the lobby); present
+   * only in the lobby and cleared when the next game starts. Backs the client-side
+   * "results" view over the lobby.
+   */
+  lastRoundResults: PlayerState[];
+  /** Text all players type in the current round. */
   text: string;
-  /** Seconds left in the current phase (30 lobby / 5 countdown / 60 round / 0 results). */
+  /** Seconds left in the current phase (30 lobby / 5 countdown / 60 round). */
   timeRemaining: number;
-  /** Clock reading when the current phase began (drives the results display time). */
-  clockAtPhaseStart: number;
-  /** Player with the highest final Wertung (null if none). */
+  /** Player with the highest final Wertung (null if none). Lobby-only. */
   winnerId: string | null;
   /** 1-based round counter (0 before the first round). */
   roundNumber: number;
@@ -82,10 +86,15 @@ export interface SpectatorSnapshot {
 /** Serializable view of the game state, emitted to all clients. */
 export interface Snapshot {
   phase: Phase;
-  /** The racing roster (ordered by Wertung in round/results; join order otherwise). */
+  /** The racing roster (ordered by Wertung in a round; join order otherwise). */
   players: PlayerSnapshot[];
   /** Spectators watching (not in the current roster). */
   spectators: SpectatorSnapshot[];
+  /**
+   * The highscore table of the last round, ranked by final Wertung. Empty outside
+   * the lobby. Backs the client-side "results" view over the lobby.
+   */
+  lastRoundResults: PlayerSnapshot[];
   text: string;
   timeRemaining: number;
   winnerId: string | null;
@@ -125,9 +134,9 @@ export function createGame(): GameState {
     phase: "lobby",
     players: [],
     spectators: [],
+    lastRoundResults: [],
     text: "",
     timeRemaining: LOBBY_DURATION,
-    clockAtPhaseStart: 0,
     winnerId: null,
     roundNumber: 0,
   };
@@ -142,31 +151,25 @@ export function createGame(): GameState {
 export function step(
   state: GameState,
   event: GameEvent,
-  clock: Clock,
   rng: () => number = Math.random,
 ): StepResult {
-  const next = apply(state, event, clock, rng);
+  const next = apply(state, event, rng);
   if (next === null) return { newState: state, snapshots: [] };
   return { newState: next, snapshots: [toSnapshot(next)] };
 }
 
-function apply(
-  state: GameState,
-  event: GameEvent,
-  clock: Clock,
-  rng: () => number,
-): GameState | null {
+function apply(state: GameState, event: GameEvent, rng: () => number): GameState | null {
   switch (event.type) {
     case "join":
       return handleJoin(state, event);
     case "signUp":
-      return settle(handleSignUp(state, event), clock, rng);
+      return settle(handleSignUp(state, event), rng);
     case "keystroke":
-      return settle(handleKeystroke(state, event), clock, rng);
+      return settle(handleKeystroke(state, event), rng);
     case "tick":
-      return handleTick(state, clock, rng);
+      return handleTick(state, rng);
     case "disconnect":
-      return settle(handleDisconnect(state, event), clock, rng);
+      return settle(handleDisconnect(state, event), rng);
   }
 }
 
@@ -234,15 +237,12 @@ function handleKeystroke(
 
 /**
  * Tick: decrements the phase timer (only when it is running) and applies any
- * transition the new value triggers. In results the timer is idle; after the
- * results display time elapses the game returns to the lobby (hostless auto-cycle).
+ * transition the new value triggers. In the lobby the timer runs only once at least
+ * one player has signed up; in the countdown and round it runs while any time remains.
  */
-function handleTick(state: GameState, clock: Clock, rng: () => number): GameState | null {
-  if (state.phase === "results") {
-    return clock() - state.clockAtPhaseStart >= RESULTS_DURATION ? backToLobby(state, clock) : null;
-  }
-  if (!isTimerRunning(state)) return null; // e.g. lobby with no players: timer is idle
-  return settle({ ...state, timeRemaining: state.timeRemaining - 1 }, clock, rng);
+function handleTick(state: GameState, rng: () => number): GameState | null {
+  if (!isTimerRunning(state)) return null;
+  return settle({ ...state, timeRemaining: state.timeRemaining - 1 }, rng);
 }
 
 /**
@@ -256,8 +256,8 @@ function isTimerRunning(state: GameState): boolean {
 
 /**
  * Disconnect: removes the participant from players OR spectators. If the winner
- * leaves it is re-derived (results) or cleared. In the lobby, if the roster becomes
- * empty, the 30s participation timer is reloaded.
+ * leaves it is cleared. In the lobby, if the roster becomes empty, the 30s
+ * participation timer is reloaded.
  */
 function handleDisconnect(
   state: GameState,
@@ -276,19 +276,9 @@ function handleDisconnect(
     ...state,
     players,
     spectators,
-    winnerId: rederiveWinner(state, players, event.playerId),
+    winnerId: state.winnerId === event.playerId ? null : state.winnerId,
     timeRemaining: lobbyTimer(state, players),
   };
-}
-
-/**
- * If the leaving player was the winner, re-derive it from the remaining roster. The winner
- * is only re-derived in the results; otherwise (or with an empty roster) it is cleared.
- */
-function rederiveWinner(state: GameState, players: PlayerState[], playerId: string): string | null {
-  if (state.winnerId !== playerId) return state.winnerId;
-  if (state.phase !== "results" || players.length === 0) return null;
-  return rankPlayers(players, "results")[0].id;
 }
 
 /** Reloads the 30s lobby timer when the roster becomes empty; otherwise keeps it. */
@@ -298,15 +288,14 @@ function lobbyTimer(state: GameState, players: PlayerState[]): number {
 
 /**
  * Applies the phase transitions the current state triggers, cascading until stable:
- * lobby → countdown, countdown → round, round → results. Results → lobby is handled
- * in {@link handleTick} (clock-based). Each rule returns the same state object when it
- * does not fire, which stops the cascade.
+ * lobby → countdown, countdown → round, round → lobby. Each rule returns the same state
+ * object when it does not fire, which stops the cascade.
  */
-function settle(state: GameState | null, clock: Clock, rng: () => number): GameState | null {
+function settle(state: GameState | null, rng: () => number): GameState | null {
   if (state === null) return null;
   let s = state;
   for (let i = 0; i < 8; i++) {
-    const next = transition(s, clock, rng);
+    const next = transition(s, rng);
     if (next === s) break; // stable: no transition fired
     s = next;
   }
@@ -314,18 +303,19 @@ function settle(state: GameState | null, clock: Clock, rng: () => number): GameS
 }
 
 /** The single transition a state can make right now, or the same state if none applies. */
-function transition(state: GameState, clock: Clock, rng: () => number): GameState {
-  if (state.phase === "lobby") return settleLobby(state, clock);
-  if (state.phase === "countdown") return settleCountdown(state, clock, rng);
-  if (state.phase === "round") return settleRound(state, clock);
-  return state; // results: no timer-driven transition here
+function transition(state: GameState, rng: () => number): GameState {
+  if (state.phase === "lobby") return settleLobby(state);
+  if (state.phase === "countdown") return settleCountdown(state, rng);
+  if (state.phase === "round") return settleRound(state);
+  return state;
 }
 
 /**
  * Lobby → countdown when the roster is full, or the timer hits 0 with 2+ players.
  * A 0-timer with fewer than 2 players just reloads the lobby timer (still waiting).
+ * The highscore table and the winner are cleared (both are lobby phenomena).
  */
-function settleLobby(state: GameState, clock: Clock): GameState {
+function settleLobby(state: GameState): GameState {
   if (state.timeRemaining === 0 && state.players.length < 2) {
     return { ...state, timeRemaining: LOBBY_DURATION };
   }
@@ -336,14 +326,15 @@ function settleLobby(state: GameState, clock: Clock): GameState {
       ...state,
       phase: "countdown",
       timeRemaining: COUNTDOWN_DURATION,
-      clockAtPhaseStart: clock(),
+      lastRoundResults: [],
+      winnerId: null,
     };
   }
   return state;
 }
 
 /** Countdown → round when the timer hits 0: pick a text, reset counters, increment the round. */
-function settleCountdown(state: GameState, clock: Clock, rng: () => number): GameState {
+function settleCountdown(state: GameState, rng: () => number): GameState {
   if (state.timeRemaining !== 0) return state;
   return {
     ...state,
@@ -352,7 +343,6 @@ function settleCountdown(state: GameState, clock: Clock, rng: () => number): Gam
     text: calibrateText(ROUND_DURATION as Duration, rng),
     roundNumber: state.roundNumber + 1,
     winnerId: null,
-    clockAtPhaseStart: clock(),
     players: state.players.map((p) => ({
       ...p,
       correct: 0,
@@ -363,63 +353,51 @@ function settleCountdown(state: GameState, clock: Clock, rng: () => number): Gam
   };
 }
 
-/** Round → results when the timer hits 0 or every player has finished the text. */
-function settleRound(state: GameState, clock: Clock): GameState {
+/**
+ * Round → lobby when the timer hits 0 or every player has finished the text.
+ * All players become spectators again; their final scores become the highscore table
+ * (`lastRoundResults`); the roster empties; the 30s participation timer is reloaded.
+ */
+function settleRound(state: GameState): GameState {
   const allFinished =
     state.players.length > 0 && state.players.every((p) => p.cursor >= state.text.length);
   if (state.timeRemaining !== 0 && !allFinished) return state;
-  const winner = state.players.length > 0 ? rankPlayers(state.players, "results")[0] : null;
-  return {
-    ...state,
-    phase: "results",
-    timeRemaining: 0,
-    winnerId: winner?.id ?? null,
-    clockAtPhaseStart: clock(),
-  };
-}
-
-/**
- * Results → lobby: all players become spectators again (they must re-sign up for the
- * next round). The 30s participation timer is reloaded.
- */
-function backToLobby(state: GameState, clock: Clock): GameState {
-  const spectators = [
-    ...state.spectators,
-    ...state.players.map((p) => ({ id: p.id, nickname: p.nickname })),
-  ];
+  const ranked = rankByWertung(state.players, true);
+  const winner = ranked.length > 0 ? ranked[0] : null;
   return {
     ...state,
     phase: "lobby",
     players: [],
-    spectators,
-    winnerId: null,
+    spectators: [
+      ...state.spectators,
+      ...state.players.map((p) => ({ id: p.id, nickname: p.nickname })),
+    ],
+    lastRoundResults: state.players,
+    winnerId: winner?.id ?? null,
     timeRemaining: LOBBY_DURATION,
-    clockAtPhaseStart: clock(),
   };
 }
 
 /**
- * Players ordered by Wertung (descending); ties keep join order. In the results phase
- * the full round duration is used as elapsed; in the round phase each player's own
- * lastTypedAt (frozen at their last keystroke) is used.
+ * Players ordered by Wertung (descending); ties keep join order. With
+ * `useFullDuration` the full round duration is used as elapsed (the round is over);
+ * otherwise each player's own lastTypedAt (frozen at their last keystroke) is used.
  */
-function rankPlayers(players: readonly PlayerState[], phase: Phase): PlayerState[] {
+function rankByWertung(players: readonly PlayerState[], useFullDuration: boolean): PlayerState[] {
   return [...players].sort((a, b) => {
-    const elapsedA = phase === "results" ? ROUND_DURATION : (a.lastTypedAt ?? 0);
-    const elapsedB = phase === "results" ? ROUND_DURATION : (b.lastTypedAt ?? 0);
+    const elapsedA = useFullDuration ? ROUND_DURATION : (a.lastTypedAt ?? 0);
+    const elapsedB = useFullDuration ? ROUND_DURATION : (b.lastTypedAt ?? 0);
     return wertung(b.correct, b.errors, elapsedB) - wertung(a.correct, a.errors, elapsedA);
   });
 }
 
 export function toSnapshot(state: GameState): Snapshot {
-  const ordered =
-    state.phase === "round" || state.phase === "results"
-      ? rankPlayers(state.players, state.phase)
-      : state.players;
+  const players = state.phase === "round" ? rankByWertung(state.players, false) : state.players;
+  const lastRoundResults = rankByWertung(state.lastRoundResults, true);
   return {
     phase: state.phase,
-    players: ordered.map((p) => {
-      const elapsed = state.phase === "results" ? ROUND_DURATION : (p.lastTypedAt ?? 0);
+    players: players.map((p) => {
+      const elapsed = state.phase === "round" ? (p.lastTypedAt ?? 0) : 0;
       return {
         id: p.id,
         nickname: p.nickname,
@@ -432,6 +410,19 @@ export function toSnapshot(state: GameState): Snapshot {
       };
     }),
     spectators: state.spectators.map((s) => ({ id: s.id, nickname: s.nickname })),
+    lastRoundResults: lastRoundResults.map((p) => {
+      const elapsed = ROUND_DURATION; // the round is over
+      return {
+        id: p.id,
+        nickname: p.nickname,
+        correct: p.correct,
+        errors: p.errors,
+        total: p.correct + p.errors,
+        cursor: p.cursor,
+        wertung: wertung(p.correct, p.errors, elapsed),
+        typingElapsed: ROUND_DURATION,
+      };
+    }),
     text: state.text,
     timeRemaining: state.timeRemaining,
     winnerId: state.winnerId,

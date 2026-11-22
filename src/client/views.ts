@@ -1,4 +1,4 @@
-import type { Snapshot } from "../engine/engine.js";
+import type { PlayerSnapshot, Snapshot } from "../engine/engine.js";
 import { el } from "./dom.js";
 import { fingerLabel, renderKeyboard } from "./keyboard.js";
 import { fingerFor } from "../engine/fingerMap.js";
@@ -47,8 +47,9 @@ function spectatorList(snap: Snapshot, myId: string | null): HTMLElement | Docum
 }
 
 /**
- * Lobby: the roster, the spectators and the 30s participation timer. Spectators
- * can sign up for the next round; the game auto-starts, nobody presses Start.
+ * Lobby: the roster, the spectators, the 30s participation timer, and — once a
+ * round has ended — the highscore table of the last round (the "results" view).
+ * Spectators can sign up for the next round; the game auto-starts, nobody presses Start.
  */
 export function renderLobby(
   app: HTMLElement,
@@ -72,6 +73,16 @@ export function renderLobby(
     playerList(snap, myId),
     spectatorList(snap, myId),
     controls,
+    ...(snap.lastRoundResults.length > 0
+      ? [
+          el(
+            "div",
+            { class: "board-wrap" },
+            el("h3", {}, "Letzte Runde"),
+            ranking(snap.lastRoundResults, myId, snap.winnerId),
+          ),
+        ]
+      : []),
   );
 }
 
@@ -174,31 +185,23 @@ export function renderLiveResults(app: HTMLElement, snap: Snapshot, myId: string
       el("h2", {}, "Live-Ergebnis"),
     ),
     el("div", { class: "timer" }, formatTime(snap.timeRemaining)),
-    ranking(snap, myId),
+    ranking(snap.players, myId, snap.winnerId),
     spectatorList(snap, myId),
   );
 }
 
-/** Final results; the game returns to the lobby on its own, players re-sign up. */
-export function renderResults(app: HTMLElement, snap: Snapshot, myId: string | null): void {
-  setCentered(app, false);
-  app.replaceChildren(
-    el("h1", {}, "TYPE RUSH"),
-    el("h2", {}, "Ergebnis"),
-    ranking(snap, myId),
-    spectatorList(snap, myId),
-    el("p", { class: "waiting" }, "Warte auf die nächste Runde…"),
-  );
-}
-
-function ranking(snap: Snapshot, myId: string | null): HTMLElement {
+function ranking(
+  people: PlayerSnapshot[],
+  myId: string | null,
+  winnerId: string | null,
+): HTMLElement {
   return el(
     "ol",
     { class: "board" },
-    ...snap.players.map((p, i) =>
+    ...people.map((p, i) =>
       el(
         "li",
-        { class: [p.id === snap.winnerId ? "winner" : "", p.id === myId ? "me" : ""].join(" ") },
+        { class: [p.id === winnerId ? "winner" : "", p.id === myId ? "me" : ""].join(" ") },
         el("span", { class: "rank" }, `${i + 1}.`),
         el("span", { class: "nick" }, p.nickname),
         el("span", { class: "wertung" }, `${p.wertung} Wertung`),

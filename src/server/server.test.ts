@@ -14,25 +14,18 @@ class FakeConn implements ClientConnection {
   }
 }
 
-function makeClock(start = 0) {
-  let now = start;
-  return { clock: () => now, advance: (sec: number) => (now += sec) };
-}
-
 function setup() {
-  const { clock, advance } = makeClock();
-  const server = new GameServer({ clock, rng: () => 0 });
-  return { server, advance };
+  const server = new GameServer({ rng: () => 0 });
+  return { server };
 }
 
 function send(conn: FakeConn, server: GameServer, msg: unknown): void {
   server.message(conn, JSON.stringify(msg));
 }
 
-/** Applies `n` server ticks, advancing the clock one second per tick. */
-function tickN(server: GameServer, n: number, advance: (sec: number) => void): void {
+/** Applies `n` server ticks. Time is modeled by the tick count, so no clock is needed. */
+function tickN(server: GameServer, n: number): void {
   for (let i = 0; i < n; i++) {
-    advance(1);
     server.tick();
   }
 }
@@ -125,7 +118,7 @@ describe("signUp", () => {
 
 describe("auto-start", () => {
   it("starts the countdown after the 30s lobby timer with 2+ players", () => {
-    const { server, advance } = setup();
+    const { server } = setup();
     const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(first);
@@ -134,14 +127,14 @@ describe("auto-start", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
-    tickN(server, 30, advance);
+    tickN(server, 30);
     expect(first.last().phase).toBe("countdown");
-    tickN(server, 5, advance);
+    tickN(server, 5);
     expect(first.last().phase).toBe("round");
   });
 
   it("starts a round with a text from the pool", () => {
-    const { server, advance } = setup();
+    const { server } = setup();
     const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(first);
@@ -150,8 +143,8 @@ describe("auto-start", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
-    tickN(server, 30, advance);
-    tickN(server, 5, advance);
+    tickN(server, 30);
+    tickN(server, 5);
     const snap = first.last();
     expect(snap.phase).toBe("round");
     expect(TEXTS).toContain(snap.text);
@@ -161,7 +154,7 @@ describe("auto-start", () => {
 
 describe("keystroke", () => {
   it("counts a correct key and advances the cursor", () => {
-    const { server, advance } = setup();
+    const { server } = setup();
     const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(first);
@@ -170,8 +163,8 @@ describe("keystroke", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
-    tickN(server, 30, advance);
-    tickN(server, 5, advance);
+    tickN(server, 30);
+    tickN(server, 5);
     const key = first.last().text[0];
     send(first, server, { type: "keystroke", key });
     const player = first.last().players[0];
@@ -180,7 +173,7 @@ describe("keystroke", () => {
   });
 
   it("counts a wrong key as error without advancing the cursor", () => {
-    const { server, advance } = setup();
+    const { server } = setup();
     const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(first);
@@ -189,8 +182,8 @@ describe("keystroke", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
-    tickN(server, 30, advance);
-    tickN(server, 5, advance);
+    tickN(server, 30);
+    tickN(server, 5);
     const key = first.last().text[0] === "a" ? "b" : "a";
     send(first, server, { type: "keystroke", key });
     const player = first.last().players[0];
@@ -201,7 +194,7 @@ describe("keystroke", () => {
 
 describe("tick", () => {
   it("advances the round timer", () => {
-    const { server, advance } = setup();
+    const { server } = setup();
     const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(first);
@@ -210,14 +203,14 @@ describe("tick", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
-    tickN(server, 30, advance);
-    tickN(server, 5, advance);
-    tickN(server, 10, advance);
+    tickN(server, 30);
+    tickN(server, 5);
+    tickN(server, 10);
     expect(first.last().timeRemaining).toBe(50);
   });
 
   it("ends the round when time runs out and picks the winner", () => {
-    const { server, advance } = setup();
+    const { server } = setup();
     const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(first);
@@ -226,17 +219,19 @@ describe("tick", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
-    tickN(server, 30, advance);
-    tickN(server, 5, advance);
+    tickN(server, 30);
+    tickN(server, 5);
     send(first, server, { type: "keystroke", key: first.last().text[0] });
-    tickN(server, 60, advance);
+    tickN(server, 60);
     const snap = first.last();
-    expect(snap.phase).toBe("results");
+    expect(snap.phase).toBe("lobby");
     expect(snap.winnerId).toBe("h");
+    expect(snap.players).toHaveLength(0);
+    expect(snap.lastRoundResults).toHaveLength(2);
   });
 
-  it("returns to the lobby after the results display time", () => {
-    const { server, advance } = setup();
+  it("ends the round directly in the lobby", () => {
+    const { server } = setup();
     const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(first);
@@ -245,15 +240,14 @@ describe("tick", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
-    tickN(server, 30, advance);
-    tickN(server, 5, advance);
-    tickN(server, 60, advance); // → results
-    advance(10);
-    server.tick(); // → lobby again (clock-based display time)
+    tickN(server, 30);
+    tickN(server, 5);
+    tickN(server, 60); // → lobby (round ends directly in the lobby)
     const snap = first.last();
     expect(snap.phase).toBe("lobby");
     expect(snap.players).toHaveLength(0);
     expect(snap.spectators.map((s) => s.id)).toEqual(["h", "p2"]);
+    expect(snap.lastRoundResults.length).toBeGreaterThan(0);
   });
 });
 
@@ -273,7 +267,7 @@ describe("disconnect", () => {
   });
 
   it("removes a player from the round, which continues", () => {
-    const { server, advance } = setup();
+    const { server } = setup();
     const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     server.connect(first);
@@ -282,8 +276,8 @@ describe("disconnect", () => {
     send(p2, server, { type: "join", nickname: "Bob" });
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
-    tickN(server, 30, advance);
-    tickN(server, 5, advance);
+    tickN(server, 30);
+    tickN(server, 5);
     server.disconnect(p2);
     const snap = first.last();
     expect(snap.phase).toBe("round");

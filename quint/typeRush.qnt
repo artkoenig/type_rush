@@ -1,14 +1,22 @@
-// Per-Spieler-Results (Variante): Die Highscore-Tabelle (Results) wird nicht mehr
-// von einem globalen Timer für alle geschlossen. Stattdessen drückt jeder Spieler
-// selbst "Zurück zu Lobby" und entscheidet, wann er geht. Die Lobby läuft im
-// Hintergrund weiter (der Lobby-Timer tickt auch in Results); startet zwischendurch
-// ein neues Spiel, werden die verbliebenen Results-Viewers zu Zuschauern des neuen
-// Spiels (sie sehen das Live-Spiel, tippen nicht mit).
+// TYPE RUSH — formales Modell (Quint).
 //
-// Unterschied zum alten Modell (globaler Results-Timer):
-// - Neues Feld `resultsViewers` (letzte Runden-Spieler, die noch Results sehen).
-// - `backToLobby(pid)` pro Spieler statt global.
-// - Lobby-Timer tickt in Lobby UND Results; signUp erlaubt in Lobby UND Results.
+// Phasen-Zyklus:  Lobby -> Countdown -> Round -> Lobby -> ...
+// Es gibt KEINE separate "Results"-Phase mehr. Die Highscore-Tabelle ("Results")
+// ist ein rein client-seitiger Blick auf die Lobby, hinterlegt durch das Feld
+// `lastRoundResults` (die Spieler der zuletzt beendeten Runde, mit ihren Scores).
+//
+// Nach jeder Runde werden ALLE Spieler zu Zuschauern (sie sehen die Tabelle in der
+// Lobby). Jeder entscheidet individuell, ob er beim nächsten Spiel mitmacht (signUp)
+// oder zuschaut. Die Tabelle ist fixiert (sie schrumpft NICHT, wenn Leute die Lobby
+// verlassen) und wird beim Start des nächsten Spiels (startCountdown) geleert.
+//
+// Engine-State:
+// - players:          aktive Spieler der laufenden Runde (tippen mit).
+// - spectators:       Zuschauer (sehen zu, tippen nicht) — inkl. der Spieler der
+//                     letzten Runde, die nach roundEnd zu Zuschauern wurden.
+// - lastRoundResults: Scores der zuletzt beendeten Runde (Hintergrund der
+//                     Highscore-Tabelle); nur in der Lobby gefüllt, sonst leer.
+// - winner:           Gewinner der letzten Runde; nur in der Lobby gesetzt, sonst NO_PID.
 module typeRush {
   // ---- Module-Parameter (via import instanziert) ----
   const PIDS: Set[int]
@@ -21,13 +29,13 @@ module typeRush {
   const NICKNAMES: Set[str]
 
   // ---- Typen ----
-  type Phase = Lobby | Countdown | Round | Results
+  type Phase = Lobby | Countdown | Round
   type PlayerState = {nickname: str, cursor: int, correct: int, errors: int}
   type EngineState = {
     phase: Phase,
     players: int -> PlayerState,
-    resultsViewers: int -> PlayerState,
     spectators: int -> str,
+    lastRoundResults: int -> PlayerState,
     winner: int,
     timeRemaining: int,
     roundText: List[str],
@@ -39,18 +47,19 @@ module typeRush {
   pure val EMPTY_PS: PlayerState = {nickname: "", cursor: 0, correct: 0, errors: 0}
 
   // ---- Abgeleitete Werte ----
+  // Verbundene Clients: Spieler + Zuschauer.
   pure def connected(s: EngineState): Set[int] =
-    s.players.keys().union(s.spectators.keys()).union(s.resultsViewers.keys())
+    s.players.keys().union(s.spectators.keys())
 
-  // Die "aktiven Racer": in Results die resultsViewers, sonst das Roster.
-  pure def racers(s: EngineState): int -> PlayerState =
-    if (s.phase == Results) { s.resultsViewers } else { s.players }
+  // Aktive Racer der laufenden Runde = die Spieler (es gibt keine Results-Phase mehr).
+  pure def racers(s: EngineState): int -> PlayerState = s.players
 
-  pure def allRacers(s: EngineState): Set[int] = s.players.keys().union(s.resultsViewers.keys())
+  // Alle getrackten Spieler-Zustände: aktive Spieler + letzte Runde (für Invarianten).
+  pure def allRacers(s: EngineState): Set[int] = s.players.keys().union(s.lastRoundResults.keys())
 
-  // Ein Racer-Zustand aus players ODER resultsViewers (für Invarianten).
+  // Ein Spieler-Zustand aus players ODER lastRoundResults (für Invarianten).
   pure def racerState(s: EngineState, pid: int): PlayerState =
-    if (pid.in(s.players.keys())) { s.players.get(pid) } else { s.resultsViewers.get(pid) }
+    if (pid.in(s.players.keys())) { s.players.get(pid) } else { s.lastRoundResults.get(pid) }
 
   // ---- Scoring ----
   pure def score(s: EngineState, pid: int): int =
@@ -75,19 +84,18 @@ module typeRush {
   // ---- Invarianten ----
   run rosterBounded = state.players.keys().size() <= MAX_PLAYERS
   run disjointPS = state.players.keys().forall(p => p.in(state.spectators.keys()) == false)
-  run disjointPR = state.players.keys().forall(p => p.in(state.resultsViewers.keys()) == false)
-  run disjointSR = state.spectators.keys().forall(p => p.in(state.resultsViewers.keys()) == false)
-  run resultsOnlyInResults = state.phase != Results implies state.resultsViewers.keys().size() == 0
+  run resultsSubset = state.lastRoundResults.keys().forall(p => p.in(PIDS))
+  // Die Tabelle ist ein Lobby-Phänomen: außerhalb der Lobby (Countdown/Round) leer.
+  run resultsOnlyInLobby = state.phase != Lobby implies state.lastRoundResults.keys().size() == 0
   run winnerValid = state.winner == NO_PID or state.winner.in(connected(state))
   run timeBounded =
     (state.phase == Lobby and state.timeRemaining >= 0 and state.timeRemaining <= LOBBY_DURATION) or
     (state.phase == Countdown and state.timeRemaining >= 0 and state.timeRemaining <= COUNTDOWN_DURATION) or
-    (state.phase == Round and state.timeRemaining >= 0 and state.timeRemaining <= ROUND_DURATION) or
-    (state.phase == Results and state.timeRemaining >= 0 and state.timeRemaining <= LOBBY_DURATION)
+    (state.phase == Round and state.timeRemaining >= 0 and state.timeRemaining <= ROUND_DURATION)
   run connectedSubset = connected(state).forall(p => p.in(PIDS))
   run spectatorNicknames = state.spectators.keys().forall(p => state.spectators.get(p).in(NICKNAMES))
   run playerNicknames = state.players.keys().forall(p => state.players.get(p).nickname.in(NICKNAMES))
-  run resultsNicknames = state.resultsViewers.keys().forall(p => state.resultsViewers.get(p).nickname.in(NICKNAMES))
+  run resultsNicknames = state.lastRoundResults.keys().forall(p => state.lastRoundResults.get(p).nickname.in(NICKNAMES))
   run cursorBounded = allRacers(state).forall(p =>
     racerState(state, p).cursor >= 0 and racerState(state, p).cursor <= state.roundText.length())
   run nonNegative = allRacers(state).forall(p =>
@@ -96,17 +104,18 @@ module typeRush {
   // ---- Witnesses ----
   val reachedCountdown = state.phase == Countdown
   val reachedRound = state.phase == Round
-  val reachedResults = state.phase == Results
   val someSpectator = state.spectators.keys().size() > 0
   val somePlayer = state.players.keys().size() > 0
-  val someResultsViewer = state.resultsViewers.keys().size() > 0
   val someWinner = state.winner != NO_PID
   val secondRound = state.roundNumber >= 2
   val fullRoster = state.players.keys().size() == MAX_PLAYERS
-  // Kern-Szenario: in Results mit neuen Lobby-Anmeldungen (neues Spiel steht bevor).
-  val resultsWithSignups = state.phase == Results and state.players.keys().size() > 0
-  // Ein Results-Viewer wurde in ein neues Spiel gezogen (ist jetzt Zuschauer).
-  val pulledIntoNewGame = state.roundNumber >= 2 and state.phase != Results and state.spectators.keys().size() > 0
+  // "Results als Lobby-Spezialfall": Highscore-Tabelle sichtbar in der Lobby.
+  val resultsAvailable = state.lastRoundResults.keys().size() > 0
+  val lobbyWithResults = state.phase == Lobby and state.lastRoundResults.keys().size() > 0
+  // Kern-Szenario: Tabelle sichtbar UND neue Spieler melden sich für das nächste Spiel an.
+  val lobbyWithResultsAndSignups = state.phase == Lobby and state.lastRoundResults.keys().size() > 0 and state.players.keys().size() > 0
+  // Zuschauer während einer Runde (z.B. die Spieler der letzten Runde).
+  val spectatorsDuringRound = state.phase == Round and state.spectators.keys().size() > 0
 
   // ---- Actions ----
 
@@ -120,10 +129,10 @@ module typeRush {
     state' = applyJoin(state, pid, nick),
   }
 
-  // signUp: Zuschauer -> Spieler ("Ich spiele mit!"). Lobby ODER Results (Lobby offen).
-  // Erster Spieler lädt den 30s-Teilnahme-Timer.
+  // signUp: Zuschauer -> Spieler ("Ich spiele mit!"). Nur in der Lobby.
+  // Erster Spieler lädt den Teilnahme-Timer.
   pure def canSignUp(s: EngineState, pid: int): bool =
-    (s.phase == Lobby or s.phase == Results) and pid.in(s.spectators.keys()) and s.players.keys().size() < MAX_PLAYERS
+    s.phase == Lobby and pid.in(s.spectators.keys()) and s.players.keys().size() < MAX_PLAYERS
   pure def applySignUp(s: EngineState, pid: int): EngineState = {
     ...s,
     players: s.players.put(pid, {...EMPTY_PS, nickname: s.spectators.get(pid)}),
@@ -135,36 +144,36 @@ module typeRush {
     state' = applySignUp(state, pid),
   }
 
-  // tick: Timer tickt runter. Round; Countdown; Lobby ODER Results (nur bei >=1 Spieler).
+  // tick: Timer tickt runter. Round; Countdown; Lobby (nur bei >=1 Spieler).
   pure def canTick(s: EngineState): bool =
     (s.phase == Round and s.timeRemaining > 0) or
     (s.phase == Countdown and s.timeRemaining > 0) or
-    ((s.phase == Lobby or s.phase == Results) and s.timeRemaining > 0 and s.players.keys().size() > 0)
+    (s.phase == Lobby and s.timeRemaining > 0 and s.players.keys().size() > 0)
   pure def applyTick(s: EngineState): EngineState = {...s, timeRemaining: s.timeRemaining - 1}
   action tick = all {
     canTick(state),
     state' = applyTick(state),
   }
 
-  // Timer abgelaufen mit <2 Spielern -> zurücksetzen, Lobby/Results wartet weiter.
+  // Timer abgelaufen mit <2 Spielern -> zurücksetzen, Lobby wartet weiter.
   action resetLobbyTimer = all {
-    (state.phase == Lobby or state.phase == Results),
+    state.phase == Lobby,
     state.timeRemaining == 0,
     state.players.keys().size() < 2,
     state' = {...state, timeRemaining: LOBBY_DURATION}
   }
 
-  // Countdown starten: Roster voll ODER Timer abgelaufen mit >=2 Spielern.
-  // Lobby ODER Results. Verbliebene Results-Viewers werden zu Zuschauern.
+  // Countdown starten: Roster voll ODER Timer abgelaufen mit >=2 Spielern. Nur aus der Lobby.
+  // Tabelle + Gewinner werden geleert (beides ist ein Lobby-Phänomen).
   pure def canStartCountdown(s: EngineState): bool =
-    (s.phase == Lobby or s.phase == Results) and (s.players.keys().size() == MAX_PLAYERS or
+    s.phase == Lobby and (s.players.keys().size() == MAX_PLAYERS or
       (s.timeRemaining == 0 and s.players.keys().size() >= 2))
   pure def applyStartCountdown(s: EngineState): EngineState = {
     ...s,
     phase: Countdown,
     timeRemaining: COUNTDOWN_DURATION,
-    spectators: s.resultsViewers.keys().fold(s.spectators, (acc, pid) => acc.put(pid, s.resultsViewers.get(pid).nickname)),
-    resultsViewers: Map()
+    lastRoundResults: Map(),
+    winner: NO_PID
   }
   action startCountdown = all {
     canStartCountdown(state),
@@ -181,21 +190,28 @@ module typeRush {
     timeRemaining: ROUND_DURATION,
     roundText: text,
     roundNumber: s.roundNumber + 1,
-    winner: NO_PID,
-    resultsViewers: Map()
+    winner: NO_PID
   }
   action startRound(text: List[str]): bool = all {
     canStartRound(state, text),
     state' = applyStartRound(state, text),
   }
 
-  // Runde beenden: Zeit abgelaufen ODER alle Spieler fertig. Racer werden zu
-  // Results-Viewern; das Roster leert sich; der Lobby-Timer wird geladen.
+  // Runde beenden: Zeit abgelaufen ODER alle Spieler fertig. Alle Spieler werden zu
+  // Zuschauern; ihre Scores gehen in lastRoundResults (Highscore-Tabelle der Lobby);
+  // das Roster leert sich; der Lobby-Timer wird geladen. Phase -> Lobby.
   pure def canRoundEnd(s: EngineState, w: int): bool =
     s.phase == Round and w.in(winnerCand(s)) and (s.timeRemaining == 0 or
       s.players.keys().forall(p => finished(s, p)))
-  pure def applyRoundEnd(s: EngineState, w: int): EngineState =
-    {...s, phase: Results, winner: w, timeRemaining: LOBBY_DURATION, players: Map(), resultsViewers: s.players}
+  pure def applyRoundEnd(s: EngineState, w: int): EngineState = {
+    ...s,
+    phase: Lobby,
+    winner: w,
+    timeRemaining: LOBBY_DURATION,
+    lastRoundResults: s.players,
+    players: Map(),
+    spectators: s.players.keys().fold(s.spectators, (acc, pid) => acc.put(pid, s.players.get(pid).nickname))
+  }
   action roundEnd(w: int): bool = all {
     canRoundEnd(state, w),
     state' = applyRoundEnd(state, w),
@@ -218,45 +234,27 @@ module typeRush {
     state' = applyKeystroke(state, pid, key),
   }
 
-  // disconnect: aus players ODER spectators ODER resultsViewers.
-  // Letzter Results-Viewer -> Phase Lobby. Leeres Roster in Lobby -> Timer neu laden.
+  // disconnect: aus players ODER spectators. Gewinner disconnectet -> NO_PID.
+  // Letzter Spieler verlässt die Lobby -> Lobby-Timer neu laden.
   pure def canDisconnect(s: EngineState, pid: int): bool = pid.in(connected(s))
   pure def applyDisconnect(s: EngineState, pid: int): EngineState = {
     ...s,
     players: s.players.keys().filter(x => x != pid).mapBy(x => s.players.get(x)),
     spectators: s.spectators.keys().filter(x => x != pid).mapBy(x => s.spectators.get(x)),
-    resultsViewers: s.resultsViewers.keys().filter(x => x != pid).mapBy(x => s.resultsViewers.get(x)),
     winner: if (s.winner == pid) { NO_PID } else { s.winner },
-    phase: if (s.phase == Results and s.resultsViewers.keys().filter(x => x != pid).size() == 0) { Lobby } else { s.phase },
-    timeRemaining: if ((s.phase == Lobby or (s.phase == Results and s.resultsViewers.keys().filter(x => x != pid).size() == 0)) and s.players.keys().filter(x => x != pid).size() == 0) { LOBBY_DURATION } else { s.timeRemaining }
+    timeRemaining: if (s.phase == Lobby and pid.in(s.players.keys()) and s.players.keys().filter(x => x != pid).size() == 0) { LOBBY_DURATION } else { s.timeRemaining }
   }
   action disconnect(pid: int): bool = all {
     canDisconnect(state, pid),
     state' = applyDisconnect(state, pid),
   }
 
-  // backToLobby(pid): ein Results-Viewer drückt "Zurück zu Lobby" -> Zuschauer.
-  // Letzter Results-Viewer -> Phase Lobby.
-  pure def canBackToLobby(s: EngineState, pid: int): bool =
-    s.phase == Results and pid.in(s.resultsViewers.keys())
-  pure def applyBackToLobby(s: EngineState, pid: int): EngineState = {
-    ...s,
-    resultsViewers: s.resultsViewers.keys().filter(x => x != pid).mapBy(x => s.resultsViewers.get(x)),
-    spectators: s.spectators.put(pid, s.resultsViewers.get(pid).nickname),
-    phase: if (s.resultsViewers.keys().filter(x => x != pid).size() == 0) { Lobby } else { Results },
-    timeRemaining: if (s.resultsViewers.keys().filter(x => x != pid).size() == 0 and s.players.keys().size() == 0) { LOBBY_DURATION } else { s.timeRemaining }
-  }
-  action backToLobby(pid: int): bool = all {
-    canBackToLobby(state, pid),
-    state' = applyBackToLobby(state, pid),
-  }
-
-  // init: Lobby offen, leeres Roster, Timer geladen (LOBBY_DURATION), läuft erst ab 1. Spieler.
+  // init: Lobby offen, leeres Roster, leere Tabelle, Timer geladen, läuft erst ab 1. Spieler.
   action init = state' = {
     phase: Lobby,
     players: Map(),
-    resultsViewers: Map(),
     spectators: Map(),
+    lastRoundResults: Map(),
     winner: NO_PID,
     timeRemaining: LOBBY_DURATION,
     roundText: List(),
@@ -279,7 +277,6 @@ module typeRush {
       roundEnd(w),
       keystroke(pid, key),
       disconnect(pid),
-      backToLobby(pid),
     }
   }
 }

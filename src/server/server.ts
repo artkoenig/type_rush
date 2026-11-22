@@ -2,7 +2,6 @@ import {
   createGame,
   step,
   toSnapshot,
-  type Clock,
   type GameEvent,
   type GameState,
   type Snapshot,
@@ -22,8 +21,6 @@ export type ClientMessage =
   { type: "join"; nickname: string } | { type: "signUp" } | { type: "keystroke"; key: string };
 
 export interface GameServerOptions {
-  /** Time source for the engine clock, in seconds. Defaults to real time. */
-  clock?: Clock;
   /** RNG for text selection. Defaults to Math.random. */
   rng?: () => number;
 }
@@ -37,11 +34,9 @@ export interface GameServerOptions {
 export class GameServer {
   private state: GameState | null = null;
   private conns = new Map<string, ClientConnection>();
-  private clock: Clock;
   private rng: () => number;
 
   constructor(options: GameServerOptions = {}) {
-    this.clock = options.clock ?? (() => Date.now() / 1000);
     this.rng = options.rng ?? Math.random;
   }
 
@@ -74,7 +69,7 @@ export class GameServer {
     this.apply(this.state, { type: "disconnect", playerId: conn.id });
   }
 
-  /** Advance the engine clock (driven by a 1s interval in the host process). */
+  /** Advance the engine by one second (driven by a 1s interval in the host process). */
   tick(): void {
     if (this.state === null) return;
     this.apply(this.state, { type: "tick" });
@@ -87,7 +82,7 @@ export class GameServer {
 
   /** Applies an engine event. Callers only invoke this with a live game. */
   private apply(state: GameState, event: GameEvent): void {
-    const result = step(state, event, this.clock, this.rng);
+    const result = step(state, event, this.rng);
     this.state = result.newState;
     if (result.snapshots.length > 0) this.broadcast(result.newState);
   }

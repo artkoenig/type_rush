@@ -1,7 +1,8 @@
-// Deterministische Tests der per-Spieler-Results-Variante.
-// Kurze Dauer-Konstanten (3/2/5). Standard-Preamble (2 Spieler):
+// Deterministische Tests des neuen Modells (Results = Lobby-Spezialfall, keine
+// Results-Phase mehr). Kurze Dauer-Konstanten (3/2/5). Standard-Preamble (2 Spieler):
 //   join x2 -> signUp x2 -> 3x tick -> startCountdown -> 2x tick -> startRound(text)
-// Nach roundEnd: players=Map(), resultsViewers=alte players, phase=Results.
+// Nach roundEnd: phase=Lobby, players=Map(), spectators=alte players,
+// lastRoundResults=alte players, winner gesetzt.
 module typeRush_test {
   import typeRush(
     PIDS = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
@@ -14,13 +15,10 @@ module typeRush_test {
     NICKNAMES = Set("ann", "ben", "carl", "dora", "eve", "fred", "gus", "hal", "ida", "joe")
   ).* from "./typeRush"
 
-  // ---- Preamble-Helfer: deterministisch in eine Runde ----
-  // (Kein shared helper möglich — Quint-Tests sind flache run-Definitionen.)
+  // ---- roundEnd -> Lobby (kein Results) ----
 
-  // ---- Per-Spieler backToLobby ----
-
-  // Ein Viewer verlässt Results -> Phase bleibt Results, er wird Zuschauer.
-  run backToLobbyOneLeavesPhaseStaysResultsTest =
+  // Nach roundEnd: Phase Lobby, Spieler -> Zuschauer, Tabelle = alte Spieler, Winner gesetzt.
+  run roundEndGoesToLobbyTest =
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
@@ -33,52 +31,21 @@ module typeRush_test {
       .then(keystroke(1, "a"))
       .then(5.reps(i => tick))
       .then(roundEnd(1))
-      .expect(and {
-        state.phase == Results,
-        state.resultsViewers.keys() == Set(1, 2),
-        state.players.keys() == Set(),
-      })
-      .then(backToLobby(1))
-      .expect(and {
-        state.phase == Results,
-        state.resultsViewers.keys() == Set(2),
-        state.spectators.keys() == Set(1),
-        state.spectators.get(1) == "ann",
-      })
-
-  // Letzter Viewer verlässt Results -> Phase Lobby.
-  run backToLobbyLastLeavesPhaseGoesLobbyTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(signUp(1))
-      .then(signUp(2))
-      .then(3.reps(i => tick))
-      .then(startCountdown)
-      .then(2.reps(i => tick))
-      .then(startRound(List("a", "b", "c")))
-      .then(keystroke(1, "a"))
-      .then(5.reps(i => tick))
-      .then(roundEnd(1))
-      .then(backToLobby(1))
-      .then(backToLobby(2))
       .expect(and {
         state.phase == Lobby,
-        state.resultsViewers.keys() == Set(),
+        state.players.keys() == Set(),
         state.spectators.keys() == Set(1, 2),
+        state.spectators.get(1) == "ann",
+        state.spectators.get(2) == "ben",
+        state.lastRoundResults.keys() == Set(1, 2),
+        state.winner == 1,
         state.timeRemaining == LOBBY_DURATION,
       })
 
-  // backToLobby nur in Results (in Lobby blockiert).
-  run backToLobbyBlockedOutsideResultsTest =
-    init
-      .then(join(1, "ann"))
-      .then(backToLobby(1).fail())
+  // ---- Tabelle + Winner werden beim neuen Spiel geleert ----
 
-  // ---- Neue Runde während Results ----
-
-  // signUp in Results erlaubt (Lobby offen): neuer Spieler, Results bleibt.
-  run signUpAllowedInResultsTest =
+  // Neue Runde in der Lobby (mit Tabelle): startCountdown leert Tabelle + Winner.
+  run resultsClearedOnNewGameTest =
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
@@ -88,29 +55,14 @@ module typeRush_test {
       .then(startCountdown)
       .then(2.reps(i => tick))
       .then(startRound(List("a", "b", "c")))
+      .then(keystroke(1, "a"))
       .then(5.reps(i => tick))
       .then(roundEnd(1))
-      .then(join(3, "carl"))
-      .then(signUp(3))
       .expect(and {
-        state.phase == Results,
-        state.players.keys() == Set(3),
-        state.resultsViewers.keys() == Set(1, 2),
+        state.phase == Lobby,
+        state.lastRoundResults.keys() == Set(1, 2),
+        state.winner == 1,
       })
-
-  // Neue Runde startet während Results: resultsViewers werden Zuschauer.
-  run newGameDuringResultsPullsViewersToSpectatorsTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(signUp(1))
-      .then(signUp(2))
-      .then(3.reps(i => tick))
-      .then(startCountdown)
-      .then(2.reps(i => tick))
-      .then(startRound(List("a", "b", "c")))
-      .then(5.reps(i => tick))
-      .then(roundEnd(1))
       .then(join(3, "carl"))
       .then(signUp(3))
       .then(join(4, "dora"))
@@ -119,13 +71,16 @@ module typeRush_test {
       .then(startCountdown)
       .expect(and {
         state.phase == Countdown,
-        state.resultsViewers.keys() == Set(),
-        state.spectators.keys() == Set(1, 2),
+        state.lastRoundResults.keys() == Set(),
+        state.winner == NO_PID,
         state.players.keys() == Set(3, 4),
+        state.spectators.keys() == Set(1, 2),
       })
 
-  // Nach dem Countdown-Ende: Runde startet, resultsViewers leer, alte Viewers tippen NICHT.
-  run pulledViewersAreSpectatorsNotPlayersTest =
+  // ---- Alte Spieler sind Zuschauer der neuen Runde ----
+
+  // Zweite Runde: alte Spieler (1,2) tippen NICHT mit, sie schauen zu; Tabelle leer.
+  run formerPlayersAreSpectatorsDuringRoundTest =
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
@@ -135,6 +90,7 @@ module typeRush_test {
       .then(startCountdown)
       .then(2.reps(i => tick))
       .then(startRound(List("a", "b", "c")))
+      .then(keystroke(1, "a"))
       .then(5.reps(i => tick))
       .then(roundEnd(1))
       .then(join(3, "carl"))
@@ -150,13 +106,13 @@ module typeRush_test {
         state.roundNumber == 2,
         state.players.keys() == Set(3, 4),
         state.spectators.keys() == Set(1, 2),
-        state.resultsViewers.keys() == Set(),
+        state.lastRoundResults.keys() == Set(),
       })
 
-  // ---- resultsViewers nur in Results ----
+  // ---- Tabelle ist von der Anwesenheit entkoppelt ----
 
-  // Nach roundEnd: resultsViewers gefüllt, players leer.
-  run resultsViewersPopulatedAfterRoundEndTest =
+  // Zuschauer (ex-Spieler) verlässt die Lobby -> Tabelle zeigt ihn weiterhin.
+  run tablePersistsWhenSpectatorsLeaveTest =
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
@@ -169,114 +125,17 @@ module typeRush_test {
       .then(keystroke(1, "a"))
       .then(5.reps(i => tick))
       .then(roundEnd(1))
-      .expect(and {
-        state.resultsViewers.keys() == Set(1, 2),
-        state.players.keys() == Set(),
-        state.phase == Results,
-      })
-
-  // Nach startCountdown (aus Results): resultsViewers geleert.
-  run resultsViewersClearedOnNewGameTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(signUp(1))
-      .then(signUp(2))
-      .then(3.reps(i => tick))
-      .then(startCountdown)
-      .then(2.reps(i => tick))
-      .then(startRound(List("a", "b", "c")))
-      .then(5.reps(i => tick))
-      .then(roundEnd(1))
-      .then(join(3, "carl"))
-      .then(signUp(3))
-      .then(join(4, "dora"))
-      .then(signUp(4))
-      .then(3.reps(i => tick))
-      .then(startCountdown)
-      .expect(state.resultsViewers.keys() == Set())
-
-  // ---- Timer in Results ----
-
-  // Lobby-Timer tickt in Results (nur bei >=1 Spieler im Roster).
-  run lobbyTimerTicksInResultsTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(signUp(1))
-      .then(signUp(2))
-      .then(3.reps(i => tick))
-      .then(startCountdown)
-      .then(2.reps(i => tick))
-      .then(startRound(List("a", "b", "c")))
-      .then(5.reps(i => tick))
-      .then(roundEnd(1))
-      .then(join(3, "carl"))
-      .then(signUp(3))
-      .then(tick)
-      .expect(state.timeRemaining == LOBBY_DURATION - 1)
-
-  // Ohne Spieler im Roster tickt der Timer in Results nicht.
-  run lobbyTimerIdleInResultsNoPlayersTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(signUp(1))
-      .then(signUp(2))
-      .then(3.reps(i => tick))
-      .then(startCountdown)
-      .then(2.reps(i => tick))
-      .then(startRound(List("a", "b", "c")))
-      .then(5.reps(i => tick))
-      .then(roundEnd(1))
-      .then(tick.fail())
-
-  // ---- Disconnect in Results ----
-
-  // Results-Viewer disconnectet -> wie backToLobby (Zuschauer).
-  run disconnectInResultsTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(signUp(1))
-      .then(signUp(2))
-      .then(3.reps(i => tick))
-      .then(startCountdown)
-      .then(2.reps(i => tick))
-      .then(startRound(List("a", "b", "c")))
-      .then(5.reps(i => tick))
-      .then(roundEnd(1))
-      .then(disconnect(1))
-      .expect(and {
-        state.phase == Results,
-        state.resultsViewers.keys() == Set(2),
-        state.spectators.keys() == Set(),
-      })
-
-  // Letzter Results-Viewer disconnectet -> Phase Lobby.
-  run disconnectLastResultsViewerGoesLobbyTest =
-    init
-      .then(join(1, "ann"))
-      .then(join(2, "ben"))
-      .then(signUp(1))
-      .then(signUp(2))
-      .then(3.reps(i => tick))
-      .then(startCountdown)
-      .then(2.reps(i => tick))
-      .then(startRound(List("a", "b", "c")))
-      .then(5.reps(i => tick))
-      .then(roundEnd(1))
-      .then(disconnect(1))
       .then(disconnect(2))
       .expect(and {
-        state.phase == Lobby,
-        state.resultsViewers.keys() == Set(),
+        state.spectators.keys() == Set(1),
+        state.lastRoundResults.keys() == Set(1, 2),
+        state.winner == 1,
       })
 
-  // ---- Winner in Results ----
+  // ---- Winner-Lebenszyklus ----
 
-  // Winner wird bei roundEnd gesetzt und bleibt in Results.
-  run winnerSetInResultsTest =
+  // Winner wird bei roundEnd gesetzt und beim Disconnect auf NO_PID zurückgesetzt.
+  run winnerClearedOnDisconnectTest =
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
@@ -287,13 +146,27 @@ module typeRush_test {
       .then(2.reps(i => tick))
       .then(startRound(List("a", "b", "c")))
       .then(keystroke(1, "a"))
-      .then(keystroke(1, "b"))
       .then(5.reps(i => tick))
       .then(roundEnd(1))
       .expect(state.winner == 1)
+      .then(disconnect(1))
+      .expect(state.winner == NO_PID)
 
-  // Winner disconnectet in Results -> winner wird NO_PID.
-  run winnerDisconnectGoesNoPidTest =
+  // ---- signUp nur in der Lobby ----
+
+  // signUp in der Lobby: Zuschauer -> Spieler.
+  run signUpOnlyInLobbyTest =
+    init
+      .then(join(1, "ann"))
+      .then(signUp(1))
+      .expect(and {
+        state.phase == Lobby,
+        state.players.keys() == Set(1),
+        state.spectators.keys() == Set(),
+      })
+
+  // signUp in der Runde blockiert (Phase != Lobby).
+  run signUpBlockedInRoundTest =
     init
       .then(join(1, "ann"))
       .then(join(2, "ben"))
@@ -303,9 +176,32 @@ module typeRush_test {
       .then(startCountdown)
       .then(2.reps(i => tick))
       .then(startRound(List("a", "b", "c")))
-      .then(keystroke(1, "a"))
-      .then(5.reps(i => tick))
-      .then(roundEnd(1))
+      .then(join(3, "carl"))
+      .then(signUp(3).fail())
+
+  // ---- Disconnect ----
+
+  // Zuschauer disconnectet -> Spieler bleiben unberührt.
+  run spectatorDisconnectTest =
+    init
+      .then(join(1, "ann"))
+      .then(join(2, "ben"))
+      .then(signUp(1))
+      .then(signUp(2))
+      .then(join(3, "carl"))
+      .then(disconnect(3))
+      .expect(and {
+        state.spectators.keys() == Set(),
+        state.players.keys() == Set(1, 2),
+      })
+
+  // Letzter Spieler verlässt die Lobby -> Lobby-Timer wird neu geladen.
+  run lastPlayerDisconnectResetsTimerTest =
+    init
+      .then(join(1, "ann"))
+      .then(signUp(1))
+      .then(2.reps(i => tick))
+      .expect(state.timeRemaining == LOBBY_DURATION - 2)
       .then(disconnect(1))
-      .expect(state.winner == NO_PID)
+      .expect(state.timeRemaining == LOBBY_DURATION)
 }

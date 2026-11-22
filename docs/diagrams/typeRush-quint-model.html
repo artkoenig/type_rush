@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TYPE RUSH – Quint-Modell (Results = Lobby-Spezialfall)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root { --accent: #e8590c; --ink: #1a1a2e; --muted: #6b7280; --bg: #faf9f7; --card: #ffffff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); line-height: 1.55; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+  h1 { font-size: 2rem; letter-spacing: .04em; margin: 0 0 .25rem; }
+  h1 .tag { font-size: .9rem; background: var(--accent); color: #fff; border-radius: 999px; padding: .2rem .7rem; vertical-align: middle; margin-left: .6rem; letter-spacing: .08em; }
+  .sub { color: var(--muted); margin: 0 0 2rem; max-width: 85ch; }
+  h2 { font-size: 1.25rem; margin: 2.5rem 0 .25rem; }
+  h2 .num { color: var(--accent); margin-right: .5rem; }
+  .desc { color: var(--muted); margin: 0 0 1rem; max-width: 80ch; }
+  .card { background: var(--card); border: 1px solid #e5e1dc; border-radius: 12px; padding: 1.25rem; overflow-x: auto; }
+  .mermaid { display: flex; justify-content: center; }
+  table { border-collapse: collapse; width: 100%; background: var(--card); border: 1px solid #e5e1dc; border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: .55rem .9rem; border-bottom: 1px solid #eee; font-size: .92rem; }
+  th { background: #f3f1ee; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .88em; background: #f0eeeb; padding: .1em .35em; border-radius: 4px; }
+  .new { color: var(--accent); font-weight: 700; }
+  .gone { color: var(--muted); text-decoration: line-through; }
+  ul { color: #333; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>TYPE RUSH <span class="tag">QUINT-MODELL</span></h1>
+  <p class="sub">Formales Modell <code>quint/typeRush.qnt</code> – Zyklus <strong>Lobby → Countdown → Round → Lobby</strong>.
+  Es gibt <span class="gone">keine Results-Phase</span> mehr: Die Highscore-Tabelle („Results“) ist ein rein
+  <em>client-seitiger</em> Blick auf die Lobby, hinterlegt durch das Feld <code>lastRoundResults</code>.
+  Nach jeder Runde werden <strong>alle</strong> Spieler zu Zuschauern.</p>
+
+  <h2><span class="num">1</span>Phasen-Automat</h2>
+  <p class="desc">Die drei Phasen des Engine-Zustands im Kreislauf. <span class="new">Neu:</span> <code>roundEnd</code>
+  führt direkt zurück in die <strong>Lobby</strong> (nicht mehr in eine Results-Phase) – die Runde ist vorbei,
+  das Spiel wartet auf die nächste Besetzung. Die „Results“-Tabelle ist nur ein Blick <em>auf</em> die Lobby.</p>
+  <div class="card">
+    <pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> Lobby : init
+
+  Lobby --> Countdown : startCountdown<br/>8 Spieler ODER (Timer 0 + 2+)
+  Countdown --> Round : startRound<br/>Timer 0, Text gezogen
+  Round --> Lobby : roundEnd<br/>Zeit 0 ODER alle fertig<br/>alle Spieler → Zuschauer<br/>Scores → lastRoundResults
+
+  Lobby --> Lobby : tick · signUp · resetLobbyTimer
+  Countdown --> Countdown : tick
+  Round --> Round : tick · keystroke
+
+  note right of Lobby
+    „Results“ = client-seitiger Blick
+    auf die Lobby (lastRoundResults)
+    – KEINE eigene Engine-Phase
+  end note
+    </pre>
+  </div>
+
+  <h2><span class="num">2</span>Rollen-Lebenszyklus</h2>
+  <p class="desc">Jede Verbindung (PID) hält genau eine Rolle; die zwei Maps
+  <code>players</code> und <code>spectators</code> sind disjunkt (Invariante).
+  <span class="new">Neu:</span> es gibt <span class="gone">keine resultsViewer-Rolle</span> mehr – nach
+  <code>roundEnd</code> werden <strong>alle</strong> Spieler zu Zuschauern, die in der Lobby die Tabelle sehen.</p>
+  <div class="card">
+    <pre class="mermaid">
+stateDiagram-v2
+  [*] --> spectator : join (jede Phase)
+
+  spectator --> player : signUp (nur Lobby)
+  player --> spectator : roundEnd<br/>(alle Spieler → Zuschauer)
+
+  spectator --> [*] : disconnect
+  player --> [*] : disconnect
+
+  note right of spectator
+    Nach einer Runde: ALLE Spieler
+    werden Zuschauer – sie sehen die
+    Highscore-Tabelle in der Lobby und
+    entscheiden, ob sie mitspielen.
+  end note
+    </pre>
+  </div>
+
+  <h2><span class="num">3</span>Zustandsform</h2>
+  <p class="desc"><code>EngineState</code> – das, was der Engine-Var <code>state</code> trägt:</p>
+  <table>
+    <tr><th>Feld</th><th>Typ</th><th>Bedeutung</th></tr>
+    <tr><td><code>phase</code></td><td><code>Lobby | Countdown | Round</code></td><td>aktuelle Phase (kein Results)</td></tr>
+    <tr><td><code>players</code></td><td><code>int → PlayerState</code></td><td>angemeldete Racer der laufenden Runde (Roster)</td></tr>
+    <tr><td><code>spectators</code></td><td><code>int → str</code></td><td>Zuschauer (PID → Nickname) – inkl. der Spieler der letzten Runde</td></tr>
+    <tr><td><code>lastRoundResults</code> <span class="new">neu</span></td><td><code>int → PlayerState</code></td><td>Scores der <em>zuletzt beendeten</em> Runde = Hintergrund der Highscore-Tabelle; <strong>nur in der Lobby gefüllt</strong>, sonst leer</td></tr>
+    <tr><td><code>winner</code></td><td><code>int</code></td><td>bestwerteter Spieler der letzten Runde (<code>-1</code> = keiner); <strong>nur in der Lobby gesetzt</strong>, sonst <code>-1</code></td></tr>
+    <tr><td><code>timeRemaining</code></td><td><code>int</code></td><td>Phasen-Timer (tickt in Lobby bei ≥1 Spielern, sonst in Countdown/Round)</td></tr>
+    <tr><td><code>roundText</code></td><td><code>List[str]</code></td><td>Text der laufenden Runde</td></tr>
+    <tr><td><code>roundNumber</code></td><td><code>int</code></td><td>Runden-Zähler</td></tr>
+  </table>
+  <p class="desc" style="margin-top:.75rem"><code>PlayerState</code> = <code>{nickname, cursor, correct, errors}</code> –
+  Wertung = <code>correct × 10 − errors × 2</code>, Tiebreak: mehr korrekte Zeichen.
+  Die Tabelle ist von der Anwesenheit <strong>entkoppelt</strong>: schrumpft sie nicht, wenn Leute die Lobby verlassen.</p>
+
+  <h2><span class="num">4</span>Was ist neu gegenüber der „Per-Spieler-Results“-Variante?</h2>
+  <ul>
+    <li><span class="new">Keine Results-Phase</span> mehr: der Zyklus ist <strong>Lobby → Countdown → Round → Lobby</strong>. Results war redundant – Spieler und Zuschauer sahen dasselbe.</li>
+    <li><span class="new">Keine <code>resultsViewer</code>-Rolle</span> mehr: nach <code>roundEnd</code> werden <strong>alle</strong> Spieler zu Zuschauern (statt einer separaten Viewer-Gruppe).</li>
+    <li><span class="new">Kein <code>backToLobby</code></span>: „zurück zur Lobby“ ist ein <em>client-seitiger</em> View-Toggle, kein Engine-Effekt – die Engine kennt nur Spieler und Zuschauer.</li>
+    <li><span class="new">Neues Feld <code>lastRoundResults</code></span>: speichert die Scores der letzten Runde (fixierte Tabelle). Wird bei <code>startCountdown</code> geleert – die Tabelle + der <code>winner</code> sind reine <strong>Lobby-Phänomene</strong>.</li>
+    <li><code>signUp</code>, <code>tick</code>, <code>resetLobbyTimer</code>, <code>startCountdown</code> sind jetzt <strong>Lobby-only</strong> (die alten Results-Zweige sind weg).</li>
+  </ul>
+
+  <footer>Quellmodell: <code>quint/typeRush.qnt</code> · Instanz: <code>typeRush_instance.qnt</code> (10 PIDs, 8er-Roster, 30/5/60s) ·
+  Invarianten: Disjunktheit <code>players</code>/<code>spectators</code>, <code>lastRoundResults</code> nur in der Lobby, Timer-/Nickname-/Cursor-Bounds, Winner-Validität.</footer>
+</div>
+<script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>

@@ -4,7 +4,6 @@ import {
   renderDisconnected,
   renderLobby,
   renderLiveResults,
-  renderResults,
   renderRound,
   type Actions,
 } from "./views.js";
@@ -86,9 +85,6 @@ function handleSnapshot(snap: Snapshot): void {
       }
       break;
     }
-    case "results":
-      renderResults(app, snap, myId);
-      break;
   }
 }
 
