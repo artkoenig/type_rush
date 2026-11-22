@@ -1,10 +1,13 @@
 import type { Snapshot } from "../engine/engine.js";
 import {
+  hideResults,
   renderCountdown,
   renderDisconnected,
   renderLobby,
   renderLiveResults,
   renderRound,
+  shouldShowResults,
+  showResults,
   type Actions,
 } from "./views.js";
 import { el } from "./dom.js";
@@ -22,6 +25,8 @@ let myId: string | null = null;
 let joined = false;
 let lastSnapshot: Snapshot | null = null;
 let cursorAtKeystroke: number | null = null;
+// roundNumber whose results popover the user already closed (null = never)
+let dismissedRound: number | null = null;
 
 const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
 
@@ -72,9 +77,17 @@ function handleSnapshot(snap: Snapshot): void {
   switch (snap.phase) {
     case "lobby":
       renderLobby(app, snap, myId, actions);
+      if (shouldShowResults(snap, dismissedRound)) {
+        showResults(snap, myId, () => {
+          dismissedRound = snap.roundNumber;
+        });
+      } else {
+        hideResults();
+      }
       break;
     case "countdown":
       renderCountdown(app, snap, myId);
+      hideResults();
       break;
     case "round": {
       if (meSpectator !== undefined && me === undefined) {
@@ -83,6 +96,7 @@ function handleSnapshot(snap: Snapshot): void {
       } else {
         renderRound(app, snap, myId, error, me?.typingElapsed ?? 0);
       }
+      hideResults();
       break;
     }
   }

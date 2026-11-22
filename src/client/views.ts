@@ -7,8 +7,8 @@ export interface Actions {
   signUp(): void;
 }
 
-function setCentered(app: HTMLElement, centered: boolean): void {
-  app.classList.toggle("centered", centered);
+function timerDisplay(seconds: number): HTMLElement {
+  return el("div", { class: "timer", aria: { live: "polite" } }, formatTime(seconds));
 }
 
 function playerList(snap: Snapshot, myId: string | null): HTMLElement {
@@ -26,29 +26,19 @@ function playerList(snap: Snapshot, myId: string | null): HTMLElement {
   );
 }
 
-function spectatorList(snap: Snapshot, myId: string | null): HTMLElement | DocumentFragment {
-  if (snap.spectators.length === 0) return document.createDocumentFragment();
+function spectatorStat(count: number): HTMLElement {
   return el(
     "div",
-    { class: "spectators" },
-    el("h3", {}, "Zuschauer"),
-    el(
-      "ul",
-      { class: "spectators-list" },
-      ...snap.spectators.map((s) =>
-        el(
-          "li",
-          { class: s.id === myId ? "me" : "" },
-          `${s.nickname}${s.id === myId ? " (du)" : ""}`,
-        ),
-      ),
-    ),
+    { class: "stat" },
+    el("span", { class: "stat-value" }, String(count)),
+    el("span", { class: "stat-label" }, " Zuschauer"),
   );
 }
 
 /**
- * Lobby: the roster, the spectators, the 30s participation timer, and — once a
- * round has ended — the highscore table of the last round (the "results" view).
+ * Lobby: the roster, the spectator count, and the 30s participation timer.
+ * The last round's highscore table is NOT rendered here — it is shown as a
+ * dismissable popover (see showResults) the moment a round ends.
  * Spectators can sign up for the next round; the game auto-starts, nobody presses Start.
  */
 export function renderLobby(
@@ -57,7 +47,6 @@ export function renderLobby(
   myId: string | null,
   actions: Actions,
 ): void {
-  setCentered(app, true);
   const isPlayer = snap.players.some((p) => p.id === myId);
   const controls = el(
     "div",
@@ -69,32 +58,85 @@ export function renderLobby(
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Lobby"),
-    el("div", { class: "timer" }, formatTime(snap.timeRemaining)),
+    timerDisplay(snap.timeRemaining),
     playerList(snap, myId),
-    spectatorList(snap, myId),
+    ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
     controls,
-    ...(snap.lastRoundResults.length > 0
-      ? [
-          el(
-            "div",
-            { class: "board-wrap" },
-            el("h3", {}, "Letzte Runde"),
-            ranking(snap.lastRoundResults, myId, snap.winnerId),
-          ),
-        ]
-      : []),
   );
+}
+
+/**
+ * Whether the results popover should be open for this lobby snapshot: there must be
+ * a finished round to show, and that round must not have been dismissed already.
+ * `dismissedRound` is the roundNumber the user closed the popover for (null = never).
+ */
+export function shouldShowResults(snap: Snapshot, dismissedRound: number | null): boolean {
+  return snap.lastRoundResults.length > 0 && snap.roundNumber !== dismissedRound;
+}
+
+/**
+ * The last round's highscore table as a modal popover, rendered on document.body so
+ * per-second re-renders of #app can neither destroy it nor steal focus. One primary
+ * action ("Schließen"); also closable via Esc. Focus moves into the dialog on open
+ * and returns to the previously focused element on close.
+ */
+let resultsOverlay: HTMLElement | null = null;
+let resultsKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+let resultsPrevFocus: Element | null = null;
+
+export function showResults(snap: Snapshot, myId: string | null, onClose: () => void): void {
+  if (resultsOverlay !== null) return; // already open for this round
+  const doClose = () => {
+    onClose();
+    hideResults();
+  };
+  const overlay = el("div", {
+    class: "overlay results-overlay",
+    aria: { modal: "true", labelledby: "results-title" },
+  });
+  overlay.setAttribute("role", "dialog");
+  const close = el("button", { class: "btn primary", on: { click: doClose } }, "Schließen");
+  const title = el("h2", {}, "Letzte Runde");
+  title.id = "results-title";
+  const box = el(
+    "div",
+    { class: "overlay-box results-box" },
+    title,
+    ranking(snap.lastRoundResults, myId, snap.winnerId),
+    close,
+  );
+  overlay.append(box);
+  document.body.append(overlay);
+  resultsOverlay = overlay;
+  resultsPrevFocus = document.activeElement;
+  close.focus();
+  resultsKeyHandler = (e) => {
+    if (e.key === "Escape") doClose();
+  };
+  document.addEventListener("keydown", resultsKeyHandler);
+}
+
+/** Removes the results popover (no-op if not open) and restores the previous focus. */
+export function hideResults(): void {
+  if (resultsOverlay === null) return;
+  resultsOverlay.remove();
+  resultsOverlay = null;
+  if (resultsKeyHandler !== null) {
+    document.removeEventListener("keydown", resultsKeyHandler);
+    resultsKeyHandler = null;
+  }
+  (resultsPrevFocus instanceof HTMLElement ? resultsPrevFocus : document.body).focus();
+  resultsPrevFocus = null;
 }
 
 /** Countdown: a big number, then the round starts automatically. */
 export function renderCountdown(app: HTMLElement, snap: Snapshot, myId: string | null): void {
-  setCentered(app, true);
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Los in…"),
-    el("div", { class: "timer" }, String(snap.timeRemaining)),
+    el("div", { class: "timer", aria: { live: "assertive" } }, String(snap.timeRemaining)),
     playerList(snap, myId),
-    spectatorList(snap, myId),
+    ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
   );
 }
 
@@ -105,7 +147,6 @@ export function renderRound(
   error: boolean,
   elapsed: number,
 ): void {
-  setCentered(app, false);
   const me = snap.players.find((p) => p.id === myId);
   const cursor = me?.cursor ?? 0;
   const nextKey = cursor < snap.text.length ? snap.text[cursor] : null;
@@ -142,40 +183,20 @@ export function renderRound(
       el("span", { class: "stat-value" }, `${accuracy}%`),
       el("span", { class: "stat-label" }, " Trefferquote"),
     ),
-  );
-
-  const board = el(
-    "ol",
-    { class: "board" },
-    ...snap.players.map((p, i) =>
-      el(
-        "li",
-        { class: p.id === myId ? "me" : "" },
-        el("span", { class: "rank" }, `${i + 1}.`),
-        el("span", { class: "nick" }, p.nickname),
-        el("span", { class: "wertung" }, String(p.wertung)),
-      ),
-    ),
+    ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
   );
 
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
-    el("div", { class: "timer" }, formatTime(snap.timeRemaining)),
+    timerDisplay(snap.timeRemaining),
     chars,
     keyboard,
     hint,
-    el(
-      "div",
-      { class: "bottom" },
-      stats,
-      el("div", { class: "board-wrap" }, el("h3", {}, "Rangliste"), board),
-      spectatorList(snap, myId),
-    ),
+    stats,
   );
 }
 
 export function renderLiveResults(app: HTMLElement, snap: Snapshot, myId: string | null): void {
-  setCentered(app, false);
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el(
@@ -184,9 +205,9 @@ export function renderLiveResults(app: HTMLElement, snap: Snapshot, myId: string
       el("span", { class: "live-dot" }),
       el("h2", {}, "Live-Ergebnis"),
     ),
-    el("div", { class: "timer" }, formatTime(snap.timeRemaining)),
+    timerDisplay(snap.timeRemaining),
     ranking(snap.players, myId, snap.winnerId),
-    spectatorList(snap, myId),
+    ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
   );
 }
 
@@ -211,7 +232,6 @@ function ranking(
 }
 
 export function renderDisconnected(app: HTMLElement): void {
-  setCentered(app, false);
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el("p", { class: "disconnected" }, "Verbindung getrennt"),

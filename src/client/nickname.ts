@@ -9,10 +9,16 @@ export function showNicknamePrompt(onSubmit: (nickname: string) => void): void {
   const overlay = document.createElement("div");
   overlay.className = "overlay";
 
+  const label = document.createElement("label");
+  label.className = "nickname-label";
+  label.textContent = "Dein Name";
+
   const input = document.createElement("input");
   input.className = "nickname";
   input.maxLength = 20;
-  input.placeholder = "Dein Name";
+  input.placeholder = "z. B. Alice";
+  label.setAttribute("for", "nickname-input");
+  input.id = "nickname-input";
 
   const submit = () => {
     onSubmit(input.value.trim() || "Spieler");
@@ -30,6 +36,7 @@ export function showNicknamePrompt(onSubmit: (nickname: string) => void): void {
     { class: "overlay-box" },
     el("h1", {}, "TYPE RUSH"),
     el("p", {}, "Wie sollen wir dich nennen?"),
+    label,
     row,
   );
   overlay.append(box);

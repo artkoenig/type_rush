@@ -1,8 +1,10 @@
-/** Tiny DOM helper: create an element with class, text and event handlers. */
+/** Tiny DOM helper: create an element with class, text, event handlers and ARIA attributes. */
 export interface ElOptions {
   class?: string;
   text?: string;
   on?: Record<string, (event: Event) => void>;
+  /** ARIA attributes to set (e.g. { "aria-live": "polite" }). */
+  aria?: Record<string, string>;
 }
 
 export function el<K extends keyof HTMLElementTagNameMap>(
@@ -13,6 +15,11 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   const node = document.createElement(tag);
   if (options.class) node.className = options.class;
   if (options.text !== undefined) node.textContent = options.text;
+  if (options.aria) {
+    for (const [attr, value] of Object.entries(options.aria)) {
+      node.setAttribute(`aria-${attr}`, value);
+    }
+  }
   if (options.on) {
     for (const [type, handler] of Object.entries(options.on)) {
       node.addEventListener(type, handler);
