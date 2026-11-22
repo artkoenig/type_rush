@@ -1,8 +1,7 @@
 import type { Snapshot } from "../engine/engine.js";
-import type { Duration } from "../content/textPool.js";
 import {
+  renderCountdown,
   renderDisconnected,
-  renderWaiting,
   renderLobby,
   renderLiveResults,
   renderResults,
@@ -28,10 +27,7 @@ let cursorAtKeystroke: number | null = null;
 const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
 
 const actions: Actions = {
-  startSession: () => send({ type: "startSession" }),
-  start: () => send({ type: "start" }),
-  setDuration: (duration: Duration) => send({ type: "setDuration", duration }),
-  endSession: () => send({ type: "endSession" }),
+  signUp: () => send({ type: "signUp" }),
 };
 
 function send(message: Record<string, unknown>): void {
@@ -49,7 +45,7 @@ ws.onmessage = (event: MessageEvent) => {
   const obj = data as { type?: unknown; playerId?: unknown; phase?: unknown };
   if (obj.type === "hello") {
     myId = typeof obj.playerId === "string" ? obj.playerId : null;
-    // Everyone (including the first player / host) enters a name via the same dialog.
+    // Everyone enters a name via the same dialog and joins as a spectator.
     showNicknamePrompt((nickname) => {
       send({ type: "join", nickname });
       joined = true;
@@ -75,11 +71,11 @@ function handleSnapshot(snap: Snapshot): void {
     cursorAtKeystroke = null;
   }
   switch (snap.phase) {
-    case "waiting":
-      renderWaiting(app, snap, myId, actions);
-      break;
     case "lobby":
       renderLobby(app, snap, myId, actions);
+      break;
+    case "countdown":
+      renderCountdown(app, snap, myId);
       break;
     case "round": {
       if (meSpectator !== undefined && me === undefined) {
@@ -91,7 +87,7 @@ function handleSnapshot(snap: Snapshot): void {
       break;
     }
     case "results":
-      renderResults(app, snap, myId, actions);
+      renderResults(app, snap, myId);
       break;
   }
 }

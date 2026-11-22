@@ -6,16 +6,13 @@ import { createGame, step, toSnapshot } from "../engine/engine.js";
 import type { Snapshot } from "../engine/engine.js";
 
 const actions = {
-  startSession: () => {},
-  start: () => {},
-  setDuration: () => {},
-  endSession: () => {},
+  signUp: () => {},
 };
 
 function makeLobby(): Snapshot {
   let state = createGame();
   state = step(state, { type: "join", playerId: "host", nickname: "Host" }, () => 0).newState;
-  state = step(state, { type: "startSession", playerId: "host" }, () => 0).newState;
+  state = step(state, { type: "signUp", playerId: "host" }, () => 0).newState;
   state = step(state, { type: "join", playerId: "p2", nickname: "Bob" }, () => 0).newState;
   return toSnapshot(state);
 }

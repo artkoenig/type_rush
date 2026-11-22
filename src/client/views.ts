@@ -1,14 +1,10 @@
 import type { Snapshot } from "../engine/engine.js";
-import { DURATIONS, type Duration } from "../content/textPool.js";
 import { el } from "./dom.js";
 import { fingerLabel, renderKeyboard } from "./keyboard.js";
 import { fingerFor } from "../engine/fingerMap.js";
 
 export interface Actions {
-  startSession(): void;
-  start(): void;
-  setDuration(duration: Duration): void;
-  endSession(): void;
+  signUp(): void;
 }
 
 function setCentered(app: HTMLElement, centered: boolean): void {
@@ -24,7 +20,7 @@ function playerList(snap: Snapshot, myId: string | null): HTMLElement {
       el(
         "li",
         { class: p.id === myId ? "me" : "" },
-        `${p.nickname}${p.isHost ? " (Host)" : ""}${p.id === myId ? " (du)" : ""}`,
+        `${p.nickname}${p.id === myId ? " (du)" : ""}`,
       ),
     ),
   );
@@ -50,33 +46,10 @@ function spectatorList(snap: Snapshot, myId: string | null): HTMLElement | Docum
   );
 }
 
-export function renderWaiting(
-  app: HTMLElement,
-  snap: Snapshot,
-  myId: string | null,
-  actions: Actions,
-): void {
-  setCentered(app, true);
-  const isHost = snap.hostId === myId;
-  const controls = el(
-    "div",
-    { class: "controls" },
-    isHost
-      ? el(
-          "button",
-          { class: "btn primary", on: { click: () => actions.startSession() } },
-          "Session starten",
-        )
-      : el("p", { class: "waiting" }, "Warte auf den Host…"),
-  );
-  app.replaceChildren(
-    el("h1", {}, "TYPE RUSH"),
-    el("h2", {}, "Warten auf neue Session"),
-    spectatorList(snap, myId),
-    controls,
-  );
-}
-
+/**
+ * Lobby: the roster, the spectators and the 30s participation timer. Spectators
+ * can sign up for the next round; the game auto-starts, nobody presses Start.
+ */
 export function renderLobby(
   app: HTMLElement,
   snap: Snapshot,
@@ -84,39 +57,33 @@ export function renderLobby(
   actions: Actions,
 ): void {
   setCentered(app, true);
-  const isHost = snap.hostId === myId;
-  const holdsStart = snap.startRight === myId;
-
+  const isPlayer = snap.players.some((p) => p.id === myId);
   const controls = el(
     "div",
     { class: "controls" },
-    isHost
-      ? el(
-          "div",
-          { class: "durations" },
-          ...DURATIONS.map((d) =>
-            el(
-              "button",
-              {
-                class: `btn${snap.duration === d ? " active" : ""}`,
-                on: { click: () => actions.setDuration(d) },
-              },
-              `${d} s`,
-            ),
-          ),
-        )
-      : el("span"),
-    holdsStart
-      ? el("button", { class: "btn primary", on: { click: () => actions.start() } }, "Start")
-      : el("p", { class: "waiting" }, "Warte auf Start…"),
+    isPlayer
+      ? el("p", { class: "waiting" }, "Warte auf Start…")
+      : el("button", { class: "btn primary", on: { click: () => actions.signUp() } }, "Mitspielen"),
   );
-
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Lobby"),
+    el("div", { class: "timer" }, formatTime(snap.timeRemaining)),
     playerList(snap, myId),
     spectatorList(snap, myId),
     controls,
+  );
+}
+
+/** Countdown: a big number, then the round starts automatically. */
+export function renderCountdown(app: HTMLElement, snap: Snapshot, myId: string | null): void {
+  setCentered(app, true);
+  app.replaceChildren(
+    el("h1", {}, "TYPE RUSH"),
+    el("h2", {}, "Los in…"),
+    el("div", { class: "timer" }, String(snap.timeRemaining)),
+    playerList(snap, myId),
+    spectatorList(snap, myId),
   );
 }
 
@@ -212,23 +179,15 @@ export function renderLiveResults(app: HTMLElement, snap: Snapshot, myId: string
   );
 }
 
-export function renderResults(
-  app: HTMLElement,
-  snap: Snapshot,
-  myId: string | null,
-  actions: Actions,
-): void {
+/** Final results; the game returns to the lobby on its own, players re-sign up. */
+export function renderResults(app: HTMLElement, snap: Snapshot, myId: string | null): void {
   setCentered(app, false);
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
     el("h2", {}, "Ergebnis"),
     ranking(snap, myId),
     spectatorList(snap, myId),
-    el(
-      "button",
-      { class: "btn primary", on: { click: () => actions.endSession() } },
-      "Neue Session",
-    ),
+    el("p", { class: "waiting" }, "Warte auf die nächste Runde…"),
   );
 }
 

@@ -7,7 +7,6 @@ import {
   type GameState,
   type Snapshot,
 } from "../engine/engine.js";
-import { calibrateText, DURATIONS, type Duration } from "../content/textPool.js";
 
 /** Minimal transport a player session talks to (one per WebSocket connection). */
 export interface ClientConnection {
@@ -15,14 +14,12 @@ export interface ClientConnection {
   send(data: string): void;
 }
 
-/** Messages a client may send; the playerId is derived from the connection. */
+/**
+ * Messages a client may send; the playerId is derived from the connection.
+ * There is no host and no manual start: the game auto-starts (engine rules).
+ */
 export type ClientMessage =
-  | { type: "join"; nickname: string }
-  | { type: "startSession" }
-  | { type: "start" }
-  | { type: "keystroke"; key: string }
-  | { type: "setDuration"; duration: Duration }
-  | { type: "endSession" };
+  { type: "join"; nickname: string } | { type: "signUp" } | { type: "keystroke"; key: string };
 
 export interface GameServerOptions {
   /** Time source for the engine clock, in seconds. Defaults to real time. */
@@ -34,8 +31,8 @@ export interface GameServerOptions {
 /**
  * Bridges WebSocket connections to the pure game engine: parses client
  * messages, forwards them as engine events, and broadcasts snapshots.
- * Every connection (including the first) joins via the nickname dialog;
- * the first joiner becomes the host.
+ * Every connection joins via the nickname dialog as a spectator; players
+ * sign up for the next round and the game auto-starts on its own.
  */
 export class GameServer {
   private state: GameState | null = null;
@@ -53,12 +50,12 @@ export class GameServer {
     this.conns.set(conn.id, conn);
     if (this.state === null) {
       this.state = createGame();
-      conn.send(JSON.stringify({ type: "hello", playerId: conn.id, isHost: false }));
+      conn.send(JSON.stringify({ type: "hello", playerId: conn.id }));
       this.broadcast(this.state);
       return;
     }
     const state = this.state;
-    conn.send(JSON.stringify({ type: "hello", playerId: conn.id, isHost: false }));
+    conn.send(JSON.stringify({ type: "hello", playerId: conn.id }));
     conn.send(JSON.stringify(toSnapshot(state)));
   }
 
@@ -67,7 +64,7 @@ export class GameServer {
     if (this.state === null) return;
     const msg = parseMessage(raw);
     if (msg === null) return;
-    this.apply(this.state, toEvent(conn.id, msg, this.state, this.rng));
+    this.apply(this.state, toEvent(conn.id, msg));
   }
 
   /** A client disconnected. */
@@ -83,14 +80,14 @@ export class GameServer {
     this.apply(this.state, { type: "tick" });
   }
 
-  /** Current snapshot, or null before the host connected. */
+  /** Current snapshot, or null before the first client connected. */
   snapshot(): Snapshot | null {
     return this.state === null ? null : toSnapshot(this.state);
   }
 
   /** Applies an engine event. Callers only invoke this with a live game. */
   private apply(state: GameState, event: GameEvent): void {
-    const result = step(state, event, this.clock);
+    const result = step(state, event, this.clock, this.rng);
     this.state = result.newState;
     if (result.snapshots.length > 0) this.broadcast(result.newState);
   }
@@ -117,11 +114,8 @@ export function parseMessage(raw: string): ClientMessage | null {
 function messageFromObject(obj: object): ClientMessage | null {
   const { type } = obj as { type?: unknown };
   if (type === "join") return joinMessage(obj);
-  if (type === "startSession") return { type: "startSession" };
-  if (type === "start") return { type: "start" };
+  if (type === "signUp") return { type: "signUp" };
   if (type === "keystroke") return keystrokeMessage(obj);
-  if (type === "setDuration") return setDurationMessage(obj);
-  if (type === "endSession") return { type: "endSession" };
   return null;
 }
 
@@ -135,34 +129,14 @@ function keystrokeMessage(obj: unknown): ClientMessage | null {
   return typeof key === "string" ? { type: "keystroke", key } : null;
 }
 
-function setDurationMessage(obj: unknown): ClientMessage | null {
-  const { duration } = obj as { duration?: unknown };
-  return isDuration(duration) ? { type: "setDuration", duration } : null;
-}
-
-function isDuration(value: unknown): value is Duration {
-  return DURATIONS.includes(value as Duration);
-}
-
 /** Maps a validated client message to the engine event for this connection. */
-function toEvent(
-  playerId: string,
-  msg: ClientMessage,
-  state: GameState,
-  rng: () => number,
-): GameEvent {
+function toEvent(playerId: string, msg: ClientMessage): GameEvent {
   switch (msg.type) {
     case "join":
       return { type: "join", playerId, nickname: msg.nickname };
-    case "startSession":
-      return { type: "startSession", playerId };
-    case "start":
-      return { type: "start", playerId, text: calibrateText(state.duration, rng) };
+    case "signUp":
+      return { type: "signUp", playerId };
     case "keystroke":
       return { type: "keystroke", playerId, key: msg.key };
-    case "setDuration":
-      return { type: "setDuration", playerId, duration: msg.duration };
-    case "endSession":
-      return { type: "endSession", playerId };
   }
 }

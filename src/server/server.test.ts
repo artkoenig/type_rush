@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GameServer, type ClientConnection } from "./server.js";
 import type { Snapshot } from "../engine/engine.js";
-import { RANGES, TEXTS } from "../content/textPool.js";
+import { TEXTS } from "../content/textPool.js";
 
 class FakeConn implements ClientConnection {
   sent: string[] = [];
@@ -29,34 +29,41 @@ function send(conn: FakeConn, server: GameServer, msg: unknown): void {
   server.message(conn, JSON.stringify(msg));
 }
 
-describe("host connection", () => {
-  it("creates an empty waiting game for the first connection", () => {
+/** Applies `n` server ticks, advancing the clock one second per tick. */
+function tickN(server: GameServer, n: number, advance: (sec: number) => void): void {
+  for (let i = 0; i < n; i++) {
+    advance(1);
+    server.tick();
+  }
+}
+
+describe("connection", () => {
+  it("creates an empty lobby for the first connection", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    expect(host.sent).toHaveLength(2); // hello + snapshot
-    const snap = host.last();
-    expect(snap.phase).toBe("waiting");
+    const first = new FakeConn("h");
+    server.connect(first);
+    expect(first.sent).toHaveLength(2); // hello + snapshot
+    const snap = first.last();
+    expect(snap.phase).toBe("lobby");
     expect(snap.players).toHaveLength(0);
     expect(snap.spectators).toHaveLength(0);
-    expect(snap.hostId).toBeNull();
   });
 
   it("greets every new connection with a hello message", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    expect(JSON.parse(host.sent[0])).toEqual({ type: "hello", playerId: "h", isHost: false });
+    const first = new FakeConn("h");
+    server.connect(first);
+    expect(JSON.parse(first.sent[0])).toEqual({ type: "hello", playerId: "h" });
     const p2 = new FakeConn("p2");
     server.connect(p2);
-    expect(JSON.parse(p2.sent[0])).toEqual({ type: "hello", playerId: "p2", isHost: false });
+    expect(JSON.parse(p2.sent[0])).toEqual({ type: "hello", playerId: "p2" });
   });
 
   it("sends the current state to each later connection", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    send(host, server, { type: "join", nickname: "Host" });
+    const first = new FakeConn("h");
+    server.connect(first);
+    send(first, server, { type: "join", nickname: "Host" });
     const p2 = new FakeConn("p2");
     server.connect(p2);
     expect(p2.sent).toHaveLength(2);
@@ -65,119 +72,128 @@ describe("host connection", () => {
 });
 
 describe("join", () => {
-  it("adds the spectator and broadcasts to all clients", () => {
+  it("adds a spectator and broadcasts to all clients", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
+    const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
-    server.connect(host);
+    server.connect(first);
     server.connect(p2);
-    send(host, server, { type: "join", nickname: "Host" });
+    send(first, server, { type: "join", nickname: "Host" });
     send(p2, server, { type: "join", nickname: "Bob" });
-    expect(host.last().spectators.map((s) => s.nickname)).toEqual(["Host", "Bob"]);
+    expect(first.last().spectators.map((s) => s.nickname)).toEqual(["Host", "Bob"]);
     expect(p2.last().spectators.map((s) => s.nickname)).toEqual(["Host", "Bob"]);
-    expect(host.last().hostId).toBe("h");
   });
 
   it("ignores invalid messages without broadcasting", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    server.message(host, "not json");
-    server.message(host, JSON.stringify(42));
-    server.message(host, JSON.stringify({ type: "nope" }));
-    server.message(host, JSON.stringify({ type: "join" }));
-    server.message(host, JSON.stringify({ type: "keystroke" }));
-    server.message(host, "null");
-    expect(host.sent).toHaveLength(2);
+    const first = new FakeConn("h");
+    server.connect(first);
+    server.message(first, "not json");
+    server.message(first, JSON.stringify(42));
+    server.message(first, JSON.stringify({ type: "nope" }));
+    server.message(first, JSON.stringify({ type: "join" }));
+    server.message(first, JSON.stringify({ type: "keystroke" }));
+    server.message(first, "null");
+    expect(first.sent).toHaveLength(2);
   });
 });
 
-describe("startSession", () => {
-  it("moves the game from waiting to the lobby and assembles the roster", () => {
+describe("signUp", () => {
+  it("moves a spectator into the roster", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
+    const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
-    server.connect(host);
+    server.connect(first);
     server.connect(p2);
-    send(host, server, { type: "join", nickname: "Host" });
+    send(first, server, { type: "join", nickname: "Host" });
     send(p2, server, { type: "join", nickname: "Bob" });
-    send(host, server, { type: "startSession" });
-    const snap = host.last();
-    expect(snap.phase).toBe("lobby");
-    expect(snap.players.map((p) => p.id)).toEqual(["h", "p2"]);
-    expect(snap.spectators).toHaveLength(0);
+    send(first, server, { type: "signUp" });
+    const snap = first.last();
+    expect(snap.players.map((p) => p.id)).toEqual(["h"]);
+    expect(snap.spectators.map((s) => s.id)).toEqual(["p2"]);
   });
 
-  it("rejects a startSession by a non-host", () => {
+  it("rejects a signUp from someone who is not a spectator", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
-    const p2 = new FakeConn("p2");
-    server.connect(host);
-    server.connect(p2);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(p2, server, { type: "join", nickname: "Bob" });
-    send(p2, server, { type: "startSession" });
-    expect(host.last().phase).toBe("waiting");
+    const first = new FakeConn("h");
+    server.connect(first);
+    // never joined: not a spectator
+    send(first, server, { type: "signUp" });
+    expect(first.sent).toHaveLength(2); // no broadcast
   });
 });
 
-describe("start", () => {
-  it("begins a round with a text calibrated to the duration", () => {
-    const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(host, server, { type: "start" });
-    const snap = host.last();
+describe("auto-start", () => {
+  it("starts the countdown after the 30s lobby timer with 2+ players", () => {
+    const { server, advance } = setup();
+    const first = new FakeConn("h");
+    const p2 = new FakeConn("p2");
+    server.connect(first);
+    server.connect(p2);
+    send(first, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
+    send(first, server, { type: "signUp" });
+    send(p2, server, { type: "signUp" });
+    tickN(server, 30, advance);
+    expect(first.last().phase).toBe("countdown");
+    tickN(server, 5, advance);
+    expect(first.last().phase).toBe("round");
+  });
+
+  it("starts a round with a text from the pool", () => {
+    const { server, advance } = setup();
+    const first = new FakeConn("h");
+    const p2 = new FakeConn("p2");
+    server.connect(first);
+    server.connect(p2);
+    send(first, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
+    send(first, server, { type: "signUp" });
+    send(p2, server, { type: "signUp" });
+    tickN(server, 30, advance);
+    tickN(server, 5, advance);
+    const snap = first.last();
     expect(snap.phase).toBe("round");
     expect(TEXTS).toContain(snap.text);
-    const [min, max] = RANGES[snap.duration];
-    expect(snap.text.length).toBeGreaterThanOrEqual(min);
-    expect(snap.text.length).toBeLessThanOrEqual(max);
     expect(snap.timeRemaining).toBe(60);
-  });
-
-  it("rejects a start by a non-host", () => {
-    const { server } = setup();
-    const host = new FakeConn("h");
-    const p2 = new FakeConn("p2");
-    server.connect(host);
-    server.connect(p2);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(p2, server, { type: "join", nickname: "Bob" });
-    send(p2, server, { type: "start" });
-    expect(host.last().phase).toBe("lobby");
-    expect(host.sent).toHaveLength(5); // hello+snap, join, startSession, p2 join; start rejected
   });
 });
 
 describe("keystroke", () => {
   it("counts a correct key and advances the cursor", () => {
-    const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(host, server, { type: "start" });
-    const key = host.last().text[0];
-    send(host, server, { type: "keystroke", key });
-    const player = host.last().players[0];
+    const { server, advance } = setup();
+    const first = new FakeConn("h");
+    const p2 = new FakeConn("p2");
+    server.connect(first);
+    server.connect(p2);
+    send(first, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
+    send(first, server, { type: "signUp" });
+    send(p2, server, { type: "signUp" });
+    tickN(server, 30, advance);
+    tickN(server, 5, advance);
+    const key = first.last().text[0];
+    send(first, server, { type: "keystroke", key });
+    const player = first.last().players[0];
     expect(player.correct).toBe(1);
     expect(player.cursor).toBe(1);
   });
 
   it("counts a wrong key as error without advancing the cursor", () => {
-    const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(host, server, { type: "start" });
-    const key = host.last().text[0] === "a" ? "b" : "a";
-    send(host, server, { type: "keystroke", key });
-    const player = host.last().players[0];
+    const { server, advance } = setup();
+    const first = new FakeConn("h");
+    const p2 = new FakeConn("p2");
+    server.connect(first);
+    server.connect(p2);
+    send(first, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
+    send(first, server, { type: "signUp" });
+    send(p2, server, { type: "signUp" });
+    tickN(server, 30, advance);
+    tickN(server, 5, advance);
+    const key = first.last().text[0] === "a" ? "b" : "a";
+    send(first, server, { type: "keystroke", key });
+    const player = first.last().players[0];
     expect(player.errors).toBe(1);
     expect(player.cursor).toBe(0);
   });
@@ -186,128 +202,113 @@ describe("keystroke", () => {
 describe("tick", () => {
   it("advances the round timer", () => {
     const { server, advance } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(host, server, { type: "start" });
-    advance(10);
-    server.tick();
-    expect(host.last().timeRemaining).toBe(50);
+    const first = new FakeConn("h");
+    const p2 = new FakeConn("p2");
+    server.connect(first);
+    server.connect(p2);
+    send(first, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
+    send(first, server, { type: "signUp" });
+    send(p2, server, { type: "signUp" });
+    tickN(server, 30, advance);
+    tickN(server, 5, advance);
+    tickN(server, 10, advance);
+    expect(first.last().timeRemaining).toBe(50);
   });
 
-  it("ends the round when time runs out", () => {
+  it("ends the round when time runs out and picks the winner", () => {
     const { server, advance } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(host, server, { type: "start" });
-    send(host, server, { type: "keystroke", key: host.last().text[0] });
-    advance(60);
-    server.tick();
-    const snap = host.last();
+    const first = new FakeConn("h");
+    const p2 = new FakeConn("p2");
+    server.connect(first);
+    server.connect(p2);
+    send(first, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
+    send(first, server, { type: "signUp" });
+    send(p2, server, { type: "signUp" });
+    tickN(server, 30, advance);
+    tickN(server, 5, advance);
+    send(first, server, { type: "keystroke", key: first.last().text[0] });
+    tickN(server, 60, advance);
+    const snap = first.last();
     expect(snap.phase).toBe("results");
     expect(snap.winnerId).toBe("h");
+  });
+
+  it("returns to the lobby after the results display time", () => {
+    const { server, advance } = setup();
+    const first = new FakeConn("h");
+    const p2 = new FakeConn("p2");
+    server.connect(first);
+    server.connect(p2);
+    send(first, server, { type: "join", nickname: "Host" });
+    send(p2, server, { type: "join", nickname: "Bob" });
+    send(first, server, { type: "signUp" });
+    send(p2, server, { type: "signUp" });
+    tickN(server, 30, advance);
+    tickN(server, 5, advance);
+    tickN(server, 60, advance); // → results
+    advance(10);
+    server.tick(); // → lobby again (clock-based display time)
+    const snap = first.last();
+    expect(snap.phase).toBe("lobby");
+    expect(snap.players).toHaveLength(0);
+    expect(snap.spectators.map((s) => s.id)).toEqual(["h", "p2"]);
   });
 });
 
 describe("disconnect", () => {
-  it("promotes the next spectator to host when the host leaves", () => {
+  it("removes a spectator from the lobby", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
+    const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
-    server.connect(host);
+    server.connect(first);
     server.connect(p2);
-    send(host, server, { type: "join", nickname: "Host" });
+    send(first, server, { type: "join", nickname: "Host" });
     send(p2, server, { type: "join", nickname: "Bob" });
-    server.disconnect(host);
-    const snap = p2.last();
-    expect(snap.phase).toBe("waiting");
-    expect(snap.spectators.map((s) => s.id)).toEqual(["p2"]);
-    expect(snap.hostId).toBe("p2");
-    expect(snap.startRight).toBeNull();
+    server.disconnect(p2);
+    const snap = first.last();
+    expect(snap.phase).toBe("lobby");
+    expect(snap.spectators.map((s) => s.id)).toEqual(["h"]);
   });
 
-  it("removes a non-host from the round, which continues", () => {
-    const { server } = setup();
-    const host = new FakeConn("h");
+  it("removes a player from the round, which continues", () => {
+    const { server, advance } = setup();
+    const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
-    server.connect(host);
+    server.connect(first);
     server.connect(p2);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
+    send(first, server, { type: "join", nickname: "Host" });
     send(p2, server, { type: "join", nickname: "Bob" });
-    send(host, server, { type: "start" });
+    send(first, server, { type: "signUp" });
+    send(p2, server, { type: "signUp" });
+    tickN(server, 30, advance);
+    tickN(server, 5, advance);
     server.disconnect(p2);
-    const snap = host.last();
+    const snap = first.last();
     expect(snap.phase).toBe("round");
     expect(snap.players.map((p) => p.id)).toEqual(["h"]);
   });
 
   it("ignores the disconnect of a connection that never joined", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
+    const first = new FakeConn("h");
     const p3 = new FakeConn("p3");
-    server.connect(host);
+    server.connect(first);
     server.connect(p3);
     server.disconnect(p3);
-    expect(host.sent).toHaveLength(2);
+    expect(first.sent).toHaveLength(2);
   });
 });
 
-describe("setDuration", () => {
-  it("lets the host change the duration in the lobby", () => {
+describe("snapshot", () => {
+  it("returns the current snapshot once a game exists", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(host, server, { type: "setDuration", duration: 30 });
-    expect(host.last().duration).toBe(30);
-  });
-
-  it("ignores a duration change by a non-host", () => {
-    const { server } = setup();
-    const host = new FakeConn("h");
-    const p2 = new FakeConn("p2");
-    server.connect(host);
-    server.connect(p2);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(p2, server, { type: "join", nickname: "Bob" });
-    send(p2, server, { type: "setDuration", duration: 30 });
-    expect(host.last().duration).toBe(60);
-  });
-
-  it("ignores an invalid duration", () => {
-    const { server } = setup();
-    const host = new FakeConn("h");
-    server.connect(host);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    server.message(host, JSON.stringify({ type: "setDuration", duration: 45 }));
-    expect(host.sent).toHaveLength(4); // hello+snap, join, startSession; invalid → no broadcast
-  });
-});
-
-describe("endSession", () => {
-  it("returns to the waiting phase and rotates the start right", () => {
-    const { server, advance } = setup();
-    const host = new FakeConn("h");
-    const p2 = new FakeConn("p2");
-    server.connect(host);
-    server.connect(p2);
-    send(host, server, { type: "join", nickname: "Host" });
-    send(host, server, { type: "startSession" });
-    send(p2, server, { type: "join", nickname: "Bob" });
-    send(host, server, { type: "start" });
-    advance(60);
-    server.tick();
-    send(host, server, { type: "endSession" });
-    const snap = host.last();
-    expect(snap.phase).toBe("waiting");
-    expect(snap.startRight).toBe("p2");
+    const first = new FakeConn("h");
+    server.connect(first);
+    send(first, server, { type: "join", nickname: "Host" });
+    expect(server.snapshot()?.phase).toBe("lobby");
+    expect(server.snapshot()?.spectators.map((s) => s.id)).toEqual(["h"]);
   });
 });
 
@@ -326,16 +327,16 @@ describe("before any connection", () => {
 describe("broadcast", () => {
   it("sends the same snapshot to all connected clients", () => {
     const { server } = setup();
-    const host = new FakeConn("h");
+    const first = new FakeConn("h");
     const p2 = new FakeConn("p2");
     const p3 = new FakeConn("p3");
-    server.connect(host);
+    server.connect(first);
     server.connect(p2);
     server.connect(p3);
-    send(host, server, { type: "join", nickname: "Host" });
+    send(first, server, { type: "join", nickname: "Host" });
     send(p3, server, { type: "join", nickname: "C" });
-    expect(host.last()).toEqual(p2.last());
-    expect(host.last()).toEqual(p3.last());
-    expect(host.last().spectators.map((s) => s.nickname)).toEqual(["Host", "C"]);
+    expect(first.last()).toEqual(p2.last());
+    expect(first.last()).toEqual(p3.last());
+    expect(first.last().spectators.map((s) => s.nickname)).toEqual(["Host", "C"]);
   });
 });

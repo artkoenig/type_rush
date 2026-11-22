@@ -1,7 +1,7 @@
 import { el } from "./dom.js";
 
 /**
- * Full-screen prompt asking a (non-host) player for a nickname before joining.
+ * Full-screen prompt asking a player for a nickname before joining.
  * Rendered on document.body so re-renders of #app (lobby/round/results) can
  * never destroy it.
  */
