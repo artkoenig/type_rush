@@ -97,11 +97,23 @@ export interface StepResult {
   snapshots: Snapshot[];
 }
 
-/** Wertung: 100·correct³ / (total²·elapsedSec), integer arithmetic, 0 if no keypresses. */
+/**
+ * Wertung = Tempo × Genauigkeit² = (correct / elapsed) · 60 · (correct / total)².
+ *
+ * - `(correct / elapsed) · 60` = Zeichen pro Minute (Tempo).
+ * - `(correct / total)²` = Tasten-Genauigkeit, quadratisch gewichtet (Fehler senken den Score).
+ * - Bei perfekter Genauigkeit (errors = 0) ist der Score exakt die Zeichen-pro-Minute.
+ * - `elapsed` = Zeit bis zum letzten Tastendruck (eingefroren) bzw. Runden-Dauer; Idle-Zeit
+ *   zählt nie gegen. 0, wenn noch keine Taste gedrückt wurde.
+ *
+ * Deterministisch: gleiche Eingaben → gleicher ganzzahliger Score (Math.floor).
+ */
 export function wertung(correct: number, errors: number, elapsedSec: number): number {
   const total = correct + errors;
   if (total === 0 || elapsedSec <= 0) return 0;
-  return Math.floor((100 * correct ** 3) / (total ** 2 * elapsedSec));
+  const tempo = (correct / elapsedSec) * 60; // Zeichen pro Minute
+  const accuracy = correct / total; // 0…1
+  return Math.floor(tempo * accuracy ** 2);
 }
 
 /**
