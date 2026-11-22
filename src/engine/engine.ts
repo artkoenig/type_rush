@@ -127,7 +127,7 @@ export function wertung(correct: number, errors: number, elapsedSec: number): nu
 
 /**
  * Creates an empty game in the lobby. The lobby is always open; the 30s
- * participation timer is loaded but only runs once the first player signs up.
+ * participation timer is loaded but only runs once at least two players have signed up.
  */
 export function createGame(): GameState {
   return {
@@ -186,7 +186,8 @@ function handleJoin(state: GameState, event: GameEvent & { type: "join" }): Game
 
 /**
  * SignUp: spectator → player ("Ich spiele mit!"). Only in the lobby, roster not full.
- * The first player to sign up (roster was empty) loads the 30s participation timer.
+ * The first player to sign up (roster was empty) (re)loads the 30s participation timer,
+ * which only starts counting once a second player joins.
  */
 function handleSignUp(state: GameState, event: GameEvent & { type: "signUp" }): GameState | null {
   if (state.phase !== "lobby") return null;
@@ -238,7 +239,7 @@ function handleKeystroke(
 /**
  * Tick: decrements the phase timer (only when it is running) and applies any
  * transition the new value triggers. In the lobby the timer runs only once at least
- * one player has signed up; in the countdown and round it runs while any time remains.
+ * two players have signed up; in the countdown and round it runs while any time remains.
  */
 function handleTick(state: GameState, rng: () => number): GameState | null {
   if (!isTimerRunning(state)) return null;
@@ -246,11 +247,12 @@ function handleTick(state: GameState, rng: () => number): GameState | null {
 }
 
 /**
- * Whether the phase timer is counting down. In the lobby it runs only once at least one
- * player has signed up; in the countdown and round it runs while any time remains.
+ * Whether the phase timer is counting down. In the lobby it runs only once at least two
+ * players have signed up (a solo player never starts a round); in the countdown and
+ * round it runs while any time remains.
  */
 function isTimerRunning(state: GameState): boolean {
-  if (state.phase === "lobby") return state.timeRemaining > 0 && state.players.length > 0;
+  if (state.phase === "lobby") return state.timeRemaining > 0 && state.players.length >= 2;
   return state.timeRemaining > 0; // countdown and round
 }
 
@@ -312,13 +314,11 @@ function transition(state: GameState, rng: () => number): GameState {
 
 /**
  * Lobby → countdown when the roster is full, or the timer hits 0 with 2+ players.
- * A 0-timer with fewer than 2 players just reloads the lobby timer (still waiting).
+ * The timer only ever counts down with 2+ players, so a 0-timer always has 2+ players
+ * and always transitions (a solo player never reaches 0, so there is nothing to reload).
  * The highscore table and the winner are cleared (both are lobby phenomena).
  */
 function settleLobby(state: GameState): GameState {
-  if (state.timeRemaining === 0 && state.players.length < 2) {
-    return { ...state, timeRemaining: LOBBY_DURATION };
-  }
   const rosterFull = state.players.length === MAX_PLAYERS;
   const timerUp = state.timeRemaining === 0 && state.players.length >= 2;
   if (rosterFull || timerUp) {

@@ -226,12 +226,15 @@ describe("engine", () => {
   });
 
   describe("lobby timer", () => {
-    it("runs only when at least one player has signed up", () => {
+    it("runs only when at least two players have signed up", () => {
       const empty = createGame();
       const idle = step(empty, { type: "tick" });
       expect(idle.newState).toBe(empty); // no players: timer is idle, no snapshot
       const withOne = lobbyGame(mkPlayer("p1", "Alice"));
-      const running = step(withOne, { type: "tick" });
+      const stillIdle = step(withOne, { type: "tick" });
+      expect(stillIdle.newState).toBe(withOne); // one player: timer not started yet
+      const withTwo = lobbyGame(mkPlayer("p1", "Alice"), mkPlayer("p2", "Bob"));
+      const running = step(withTwo, { type: "tick" });
       expect(running.newState.timeRemaining).toBe(LOBBY_DURATION - 1);
     });
 
@@ -239,16 +242,19 @@ describe("engine", () => {
       const roundDone = { ...roundGame("hallo", mkPlayer("p1", "Alice")), timeRemaining: 0 };
       const idleRound = step(roundDone, { type: "tick" });
       expect(idleRound.newState).toBe(roundDone); // no snapshot
-      const lobbyDone = { ...lobbyGame(mkPlayer("p1", "Alice")), timeRemaining: 0 };
+      const lobbyDone = {
+        ...lobbyGame(mkPlayer("p1", "Alice"), mkPlayer("p2", "Bob")),
+        timeRemaining: 0,
+      };
       const idleLobby = step(lobbyDone, { type: "tick" });
       expect(idleLobby.newState).toBe(lobbyDone); // no snapshot
     });
 
-    it("reloads the timer when it hits 0 with fewer than 2 players", () => {
+    it("does not start the timer with fewer than 2 players", () => {
       const one = lobbyGame(mkPlayer("p1", "Alice"));
       const { state } = tickN(one, LOBBY_DURATION);
       expect(state.phase).toBe("lobby");
-      expect(state.timeRemaining).toBe(LOBBY_DURATION); // reloaded, still waiting for a 2nd player
+      expect(state.timeRemaining).toBe(LOBBY_DURATION); // never started: still waiting for a 2nd player
     });
 
     it("starts the countdown when the timer hits 0 with 2+ players", () => {
