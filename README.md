@@ -26,5 +26,6 @@ The codebase is checked on several levels:
 | Type checking | TypeScript (`tsc`) | Catches type errors across the codebase |
 | Style & formatting | ESLint + Prettier | Enforces consistent code style |
 | Unit tests | Vitest | Verifies the engine behaves correctly and enforces a minimum coverage threshold |
+| Change risk | CRAP Score (`@barney-media/crap-typescript-vitest`) | Combines cyclomatic complexity with per-function coverage into a change-risk score; fails the build if any function exceeds the threshold (10) |
 | Pre-commit hook | Husky + lint-staged | Runs lint + format on staged files before each commit |
 | Formal model | Quint | Independently verifies the game rules (invariants + reachability) |
