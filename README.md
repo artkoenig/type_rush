@@ -26,6 +26,8 @@ The codebase is checked on several levels:
 | Type checking | TypeScript (`tsc`) | Catches type errors across the codebase |
 | Style & formatting | ESLint + Prettier | Enforces consistent code style |
 | Unit tests | Vitest | Verifies the engine behaves correctly and enforces a minimum coverage threshold |
+| Property-based tests | fast-check | Generates random event sequences to verify the engine stays well-formed and deterministic under arbitrary inputs |
 | Change risk | CRAP Score (`@barney-media/crap-typescript-vitest`) | Combines cyclomatic complexity with per-function coverage into a change-risk score; fails the build if any function exceeds the threshold (10) |
+| Mutation testing | Stryker | Injects small faults into the engine and content to measure how well the tests catch them; fails the build if the mutation score drops below 70% (`npm run test:mutation`) |
 | Pre-commit hook | Husky + lint-staged | Runs lint + format on staged files before each commit |
 | Formal model | Quint | Independently verifies the game rules (invariants + reachability) |

@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "inPlace": true,
+  "vitest": {
+    "configFile": "vitest.stryker.config.ts",
+    "related": true
+  },
+  "ignorePatterns": ["**", "!src/engine/**/*.ts", "!src/content/**/*.ts", "**/*.test.ts"],
+  "tempDirName": ".stryker-tmp",
+  "thresholds": {
+    "high": 75,
+    "low": 70,
+    "break": 70
+  }
+}

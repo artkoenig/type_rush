@@ -4,3 +4,7 @@ coverage
 
 # editor backups
 *.bak
+
+# stryker mutation testing (reports/ = event+html+json reports, .stryker-tmp = inPlace backup)
+reports/
+.stryker-tmp
