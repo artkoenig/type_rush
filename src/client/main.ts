@@ -68,7 +68,6 @@ ws.onclose = () => {
 function handleSnapshot(snap: Snapshot): void {
   lastSnapshot = snap;
   const me = snap.players.find((p) => p.id === myId);
-  const meSpectator = snap.spectators.find((s) => s.id === myId);
   let error = false;
   if (cursorAtKeystroke !== null && me !== undefined) {
     error = me.cursor === cursorAtKeystroke;
@@ -90,7 +89,7 @@ function handleSnapshot(snap: Snapshot): void {
       hideResults();
       break;
     case "round": {
-      if (meSpectator !== undefined && me === undefined) {
+      if (joined && me === undefined) {
         // Spectator view: live results (leaderboard updates in real-time)
         renderLiveResults(app, snap, myId);
       } else {

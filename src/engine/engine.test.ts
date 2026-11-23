@@ -427,7 +427,7 @@ describe("engine", () => {
       const snap = toSnapshot(game);
       expect(snap.phase).toBe("lobby");
       expect(snap.players).toHaveLength(0);
-      expect(snap.spectators.map((s) => s.id)).toEqual(["p1", "p2"]);
+      expect(snap.spectatorsCount).toBe(2);
       expect(snap.winnerId).toBe("p1");
       // the highscore table is ranked by final Wertung (full round duration)
       expect(snap.lastRoundResults.map((p) => p.id)).toEqual(["p1", "p2"]);
@@ -547,7 +547,7 @@ describe("engine", () => {
       expect(snap.players[0].wertung).toBeGreaterThan(snap.players[1].wertung);
     });
 
-    it("exposes text, timeRemaining, roundNumber and spectators", () => {
+    it("exposes text, timeRemaining, roundNumber and spectatorsCount", () => {
       const snap = toSnapshot(roundGame("hallo", mkPlayer("p1", "Alice")));
       expect(snap.phase).toBe("round");
       expect(snap.text).toBe("hallo");
@@ -555,7 +555,7 @@ describe("engine", () => {
       expect(snap.roundNumber).toBe(1);
       expect(snap.winnerId).toBeNull();
       expect(snap.players).toHaveLength(1);
-      expect(snap.spectators).toHaveLength(0);
+      expect(snap.spectatorsCount).toBe(0);
       expect(snap.lastRoundResults).toHaveLength(0);
     });
   });

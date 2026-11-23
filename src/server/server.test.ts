@@ -40,7 +40,7 @@ describe("connection", () => {
     const snap = first.last();
     expect(snap.phase).toBe("lobby");
     expect(snap.players).toHaveLength(0);
-    expect(snap.spectators).toHaveLength(0);
+    expect(snap.spectatorsCount).toBe(0);
   });
 
   it("greets every new connection with a hello message", () => {
@@ -61,7 +61,7 @@ describe("connection", () => {
     const p2 = new FakeConn("p2");
     server.connect(p2);
     expect(p2.sent).toHaveLength(2);
-    expect(p2.last().spectators.map((s) => s.id)).toEqual(["h"]);
+    expect(p2.last().spectatorsCount).toBe(1);
   });
 });
 
@@ -74,8 +74,8 @@ describe("join", () => {
     server.connect(p2);
     send(first, server, { type: "join", nickname: "Host" });
     send(p2, server, { type: "join", nickname: "Bob" });
-    expect(first.last().spectators.map((s) => s.nickname)).toEqual(["Host", "Bob"]);
-    expect(p2.last().spectators.map((s) => s.nickname)).toEqual(["Host", "Bob"]);
+    expect(first.last().spectatorsCount).toBe(2);
+    expect(p2.last().spectatorsCount).toBe(2);
   });
 
   it("ignores invalid messages without broadcasting", () => {
@@ -104,7 +104,7 @@ describe("signUp", () => {
     send(first, server, { type: "signUp" });
     const snap = first.last();
     expect(snap.players.map((p) => p.id)).toEqual(["h"]);
-    expect(snap.spectators.map((s) => s.id)).toEqual(["p2"]);
+    expect(snap.spectatorsCount).toBe(1);
   });
 
   it("rejects a signUp from someone who is not a spectator", () => {
@@ -247,7 +247,7 @@ describe("tick", () => {
     const snap = first.last();
     expect(snap.phase).toBe("lobby");
     expect(snap.players).toHaveLength(0);
-    expect(snap.spectators.map((s) => s.id)).toEqual(["h", "p2"]);
+    expect(snap.spectatorsCount).toBe(2);
     expect(snap.lastRoundResults.length).toBeGreaterThan(0);
   });
 });
@@ -264,7 +264,7 @@ describe("disconnect", () => {
     server.disconnect(p2);
     const snap = first.last();
     expect(snap.phase).toBe("lobby");
-    expect(snap.spectators.map((s) => s.id)).toEqual(["h"]);
+    expect(snap.spectatorsCount).toBe(1);
   });
 
   it("removes a player from the round, which continues", () => {
@@ -303,7 +303,7 @@ describe("snapshot", () => {
     server.connect(first);
     send(first, server, { type: "join", nickname: "Host" });
     expect(server.snapshot()?.phase).toBe("lobby");
-    expect(server.snapshot()?.spectators.map((s) => s.id)).toEqual(["h"]);
+    expect(server.snapshot()?.spectatorsCount).toBe(1);
   });
 });
 
@@ -332,6 +332,6 @@ describe("broadcast", () => {
     send(p3, server, { type: "join", nickname: "C" });
     expect(first.last()).toEqual(p2.last());
     expect(first.last()).toEqual(p3.last());
-    expect(first.last().spectators.map((s) => s.nickname)).toEqual(["Host", "C"]);
+    expect(first.last().spectatorsCount).toBe(2);
   });
 });

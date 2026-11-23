@@ -127,7 +127,7 @@ export class SimulatedUser {
     const now = Date.now();
     const me = snap.players.find((p) => p.id === this.myId);
     this.curInPlayers = me !== undefined;
-    this.curInSpectators = snap.spectators.some((s) => s.id === this.myId);
+    this.curInSpectators = !this.curInPlayers;
     if (me) {
       this.curCorrect = me.correct;
       this.curErrors = me.errors;

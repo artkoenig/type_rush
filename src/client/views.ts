@@ -60,7 +60,7 @@ export function renderLobby(
     el("h2", {}, "Lobby"),
     timerDisplay(snap.timeRemaining),
     playerList(snap, myId),
-    ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
+    ...(snap.spectatorsCount > 0 ? [spectatorStat(snap.spectatorsCount)] : []),
     controls,
   );
 }
@@ -138,7 +138,7 @@ export function renderCountdown(app: HTMLElement, snap: Snapshot): void {
       { class: "timer countdown-word", aria: { live: "assertive" } },
       snap.countdownWord ?? "",
     ),
-    ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
+    ...(snap.spectatorsCount > 0 ? [spectatorStat(snap.spectatorsCount)] : []),
   );
 }
 
@@ -185,7 +185,7 @@ export function renderRound(
       el("span", { class: "stat-value" }, `${accuracy}%`),
       el("span", { class: "stat-label" }, " Trefferquote"),
     ),
-    ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
+    ...(snap.spectatorsCount > 0 ? [spectatorStat(snap.spectatorsCount)] : []),
   );
 
   app.replaceChildren(
@@ -209,7 +209,7 @@ export function renderLiveResults(app: HTMLElement, snap: Snapshot, myId: string
     ),
     timerDisplay(snap.timeRemaining),
     ranking(snap.players, myId, snap.winnerId),
-    ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
+    ...(snap.spectatorsCount > 0 ? [spectatorStat(snap.spectatorsCount)] : []),
   );
 }
 

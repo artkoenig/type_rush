@@ -10,10 +10,7 @@ function resultsLobby(roundNumber = 2): Snapshot {
   return {
     phase: "lobby",
     players: [],
-    spectators: [
-      { id: "s1", nickname: "Ben" },
-      { id: "s2", nickname: "Lena" },
-    ],
+    spectatorsCount: 2,
     lastRoundResults: [
       {
         id: "p1",

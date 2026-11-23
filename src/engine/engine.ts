@@ -88,18 +88,13 @@ export interface PlayerSnapshot {
   typingElapsed: number;
 }
 
-export interface SpectatorSnapshot {
-  id: string;
-  nickname: string;
-}
-
 /** Serializable view of the game state, emitted to all clients. */
 export interface Snapshot {
   phase: Phase;
   /** The racing roster (ordered by Wertung in a round; join order otherwise). */
   players: PlayerSnapshot[];
-  /** Spectators watching (not in the current roster). */
-  spectators: SpectatorSnapshot[];
+  /** Number of spectators watching (not in the current roster). */
+  spectatorsCount: number;
   /**
    * The highscore table of the last round, ranked by final Wertung. Empty outside
    * the lobby. Backs the client-side "results" view over the lobby.
@@ -421,7 +416,7 @@ export function toSnapshot(state: GameState): Snapshot {
         typingElapsed: p.lastTypedAt ?? 0,
       };
     }),
-    spectators: state.spectators.map((s) => ({ id: s.id, nickname: s.nickname })),
+    spectatorsCount: state.spectators.length,
     lastRoundResults: lastRoundResults.map((p) => {
       const elapsed = ROUND_DURATION; // the round is over
       return {
