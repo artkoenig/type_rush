@@ -5,6 +5,8 @@ coverage
 # editor backups
 *.bak
 
-# stryker mutation testing (reports/ = event+html+json reports, .stryker-tmp = inPlace backup)
-reports/
+# stryker mutation testing (reports/* = event+html+json reports, .stryker-tmp = inPlace backup)
+# …but keep the load-test result reports (reports/loadtest-*.md) versioned.
+reports/*
+!reports/loadtest-*.md
 .stryker-tmp
