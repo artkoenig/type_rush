@@ -130,11 +130,14 @@ export function hideResults(): void {
 }
 
 /** Countdown: a big number, then the round starts automatically. */
-export function renderCountdown(app: HTMLElement, snap: Snapshot, myId: string | null): void {
+export function renderCountdown(app: HTMLElement, snap: Snapshot): void {
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
-    el("div", { class: "timer", aria: { live: "assertive" } }, snap.countdownWord ?? ""),
-    playerList(snap, myId),
+    el(
+      "div",
+      { class: "timer countdown-word", aria: { live: "assertive" } },
+      snap.countdownWord ?? "",
+    ),
     ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
   );
 }

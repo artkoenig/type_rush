@@ -86,7 +86,7 @@ function handleSnapshot(snap: Snapshot): void {
       }
       break;
     case "countdown":
-      renderCountdown(app, snap, myId);
+      renderCountdown(app, snap);
       hideResults();
       break;
     case "round": {

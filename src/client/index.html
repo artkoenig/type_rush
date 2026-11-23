@@ -141,6 +141,27 @@
         text-shadow: var(--glow-magenta);
         font-variant-numeric: tabular-nums;
       }
+      /* Countdown word: fade in while zooming in, then fade out at full size (800ms).
+         The element is recreated on each per-second snapshot, so the animation
+         restarts for every new word. */
+      .countdown-word {
+        opacity: 0;
+        animation: countdown-word 800ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+      }
+      @keyframes countdown-word {
+        0% {
+          opacity: 0;
+          transform: scale(0.5);
+        }
+        40% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        100% {
+          opacity: 0;
+          transform: scale(1);
+        }
+      }
       .text {
         font-size: clamp(1.1rem, 2.5vw, 1.7rem);
         line-height: 1.8;
@@ -466,6 +487,10 @@
       @media (prefers-reduced-motion: reduce) {
         body::after {
           display: none;
+        }
+        .countdown-word {
+          animation: none;
+          opacity: 1;
         }
         .live-dot {
           animation: none;
