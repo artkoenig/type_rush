@@ -18,7 +18,7 @@ Ein lokales Multiplayer-Rennspiel: Ein Server-Process läuft auf einer Maschine 
 angezeigte URL. **Ohne Host und ohne manuellen Start:** Jeder, der die URL öffnet, tritt
 als Zuschauer bei und kann sich für die nächste Runde anmelden (*Mitspielen*). Das Spiel
 läuft im eigenen Takt: Die Lobby zählt 30 Sekunden herunter (sofern sich mindestens zwei
-Spieler angemeldet haben; bei acht Spielern sofort), dann ein 5-Sekunden-Countdown, dann
+Spieler angemeldet haben; bei acht Spielern sofort), dann ein 3-Sekunden-Countdown, dann
 die Runde mit fester Dauer. Alle tippen denselben deutschen Text; die höchste **Wertung**
 (Tempo + Tasten-Genauigkeit) gewinnt. Die UI zeigt permanent, welcher **Finger** die
 nächste Taste drücken soll (Lernhilfe, zählt nicht in die Wertung), hebt das nächste
@@ -34,7 +34,7 @@ geht es automatisch zurück in die Lobby – das Spiel zirkuliert endlos.
 4. As a player, I want to enter my own nickname when joining, so that I can be identified on the leaderboard.
 5. As a player, I want to see all signed-up players and the spectators in the lobby, so that I know who I am racing against.
 6. As a player, I want to sign up for the next round with a single button, so that I can join the race without coordinating with anyone.
-7. As a player, I want the round to start automatically (30s lobby timer with 2+ players, immediately at 8 players, then a 5s countdown), so that nobody has to coordinate the start.
+7. As a player, I want the round to start automatically (30s lobby timer with 2+ players, immediately at 8 players, then a 3s countdown), so that nobody has to coordinate the start.
 8. As a player, I want the game to cycle on its own (lobby → countdown → round → results → lobby), so that the game keeps running without any host.
 9. As a player, I want to see the text to type in large characters, so that I can read it comfortably.
 10. As a player, I want the next character to be highlighted, so that I always know where I am.
@@ -65,7 +65,7 @@ geht es automatisch zurück in die Lobby – das Spiel zirkuliert endlos.
 - **Blocking errors (ADR 0003):** A wrong keypress does not advance the cursor; the spot is marked red; the correct key must be pressed to continue; every wrong press counts as an error.
 - **Finger mapping:** A QWERTZ home-row finger map (key → finger) drives the Finger-Hinweis. Pure function, used by both the engine (for any server-side needs) and the frontend diagram. Not part of the Wertung.
 - **Text source:** A curated, bundled list of common German words/sentences on QWERTZ; one is chosen at random per round; length calibrated to the round duration (~1–1.3 chars/sec): 60s → 60–80 chars.
-- **Auto-start (replaces host + Start-Recht):** The lobby timer (30s) plus the 5s countdown fully replace the old host-driven start. No one can trigger or delay a start; the only player input is signing up.
+- **Auto-start (replaces host + Start-Recht):** The lobby timer (30s) plus the 3s countdown fully replace the old host-driven start. No one can trigger or delay a start; the only player input is signing up.
 - **Discovery:** The presenting machine displays the LAN URL on screen. No QR code.
 - **No persistence:** No accounts, no saved highscores, no data written to disk beyond the bundled content.
 

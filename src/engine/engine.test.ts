@@ -272,6 +272,20 @@ describe("engine", () => {
   });
 
   describe("countdown", () => {
+    it("shows one word per countdown tick, then starts the round", () => {
+      // A lobby one tick from starting: the next tick ends the lobby and begins the countdown.
+      const lobby = lobbyGame(mkPlayer("p1", "Alice"), mkPlayer("p2", "Bob"));
+      lobby.timeRemaining = 1;
+      const { state, snapshots } = tickN(lobby, 1 + COUNTDOWN_DURATION);
+      expect(snapshots.map((s) => s.countdownWord)).toEqual([
+        "Auf die Tasten…",
+        "Fertig…",
+        "Los!",
+        null,
+      ]);
+      expect(state.phase).toBe("round");
+    });
+
     it("auto-starts the round when it hits 0", () => {
       const cd = countdownGame(mkPlayer("p1", "Alice"), mkPlayer("p2", "Bob"));
       const { state } = tickN(cd, COUNTDOWN_DURATION);

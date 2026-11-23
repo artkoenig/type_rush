@@ -24,7 +24,7 @@ angemeldet ist.
 
 **Auto-Start**:
 Der Ablauf, durch den das Spiel ohne Host von selbst läuft: Lobby-Timer (30s) → Countdown
-(5s) → Runde → Ergebnisse (10s) → Lobby. Er ersetzt das frühere Start-Recht.
+(3s) → Runde → Ergebnisse (10s) → Lobby. Er ersetzt das frühere Start-Recht.
 _Avoid_: Start-Recht, Session-Start
 
 **Server**:

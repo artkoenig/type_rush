@@ -12,8 +12,18 @@ export type Phase = "lobby" | "countdown" | "round";
 
 /** Fixed phase durations, in seconds. */
 export const LOBBY_DURATION = 30;
-export const COUNTDOWN_DURATION = 5;
+export const COUNTDOWN_DURATION = 3;
 export const ROUND_DURATION = 60;
+
+/** One word per countdown tick, in order (index = ticks elapsed since the countdown began). */
+const COUNTDOWN_WORDS = ["Auf die Tasten…", "Fertig…", "Los!"];
+
+/** The countdown word for the current state, or null outside the countdown. */
+function countdownWord(state: GameState): string | null {
+  if (state.phase !== "countdown") return null;
+  const elapsed = COUNTDOWN_DURATION - state.timeRemaining;
+  return COUNTDOWN_WORDS[elapsed] ?? null;
+}
 
 /** Maximum number of players in the racing roster. */
 export const MAX_PLAYERS = 8;
@@ -97,6 +107,8 @@ export interface Snapshot {
   lastRoundResults: PlayerSnapshot[];
   text: string;
   timeRemaining: number;
+  /** Countdown word shown to clients (null outside the countdown). */
+  countdownWord: string | null;
   winnerId: string | null;
   roundNumber: number;
 }
@@ -425,6 +437,7 @@ export function toSnapshot(state: GameState): Snapshot {
     }),
     text: state.text,
     timeRemaining: state.timeRemaining,
+    countdownWord: countdownWord(state),
     winnerId: state.winnerId,
     roundNumber: state.roundNumber,
   };

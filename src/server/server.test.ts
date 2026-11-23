@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GameServer, type ClientConnection } from "./server.js";
 import type { Snapshot } from "../engine/engine.js";
+import { COUNTDOWN_DURATION, ROUND_DURATION } from "../engine/engine.js";
 import { TEXTS } from "../content/textPool.js";
 
 class FakeConn implements ClientConnection {
@@ -129,7 +130,7 @@ describe("auto-start", () => {
     send(p2, server, { type: "signUp" });
     tickN(server, 30);
     expect(first.last().phase).toBe("countdown");
-    tickN(server, 5);
+    tickN(server, COUNTDOWN_DURATION);
     expect(first.last().phase).toBe("round");
   });
 
@@ -144,11 +145,11 @@ describe("auto-start", () => {
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
     tickN(server, 30);
-    tickN(server, 5);
+    tickN(server, COUNTDOWN_DURATION);
     const snap = first.last();
     expect(snap.phase).toBe("round");
     expect(TEXTS).toContain(snap.text);
-    expect(snap.timeRemaining).toBe(60);
+    expect(snap.timeRemaining).toBe(ROUND_DURATION);
   });
 });
 
@@ -164,7 +165,7 @@ describe("keystroke", () => {
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
     tickN(server, 30);
-    tickN(server, 5);
+    tickN(server, COUNTDOWN_DURATION);
     const key = first.last().text[0];
     send(first, server, { type: "keystroke", key });
     const player = first.last().players[0];
@@ -183,7 +184,7 @@ describe("keystroke", () => {
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
     tickN(server, 30);
-    tickN(server, 5);
+    tickN(server, COUNTDOWN_DURATION);
     const key = first.last().text[0] === "a" ? "b" : "a";
     send(first, server, { type: "keystroke", key });
     const player = first.last().players[0];
@@ -204,9 +205,9 @@ describe("tick", () => {
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
     tickN(server, 30);
-    tickN(server, 5);
+    tickN(server, COUNTDOWN_DURATION);
     tickN(server, 10);
-    expect(first.last().timeRemaining).toBe(50);
+    expect(first.last().timeRemaining).toBe(ROUND_DURATION - 10);
   });
 
   it("ends the round when time runs out and picks the winner", () => {
@@ -220,7 +221,7 @@ describe("tick", () => {
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
     tickN(server, 30);
-    tickN(server, 5);
+    tickN(server, COUNTDOWN_DURATION);
     send(first, server, { type: "keystroke", key: first.last().text[0] });
     tickN(server, 60);
     const snap = first.last();
@@ -241,7 +242,7 @@ describe("tick", () => {
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
     tickN(server, 30);
-    tickN(server, 5);
+    tickN(server, COUNTDOWN_DURATION);
     tickN(server, 60); // → lobby (round ends directly in the lobby)
     const snap = first.last();
     expect(snap.phase).toBe("lobby");
@@ -277,7 +278,7 @@ describe("disconnect", () => {
     send(first, server, { type: "signUp" });
     send(p2, server, { type: "signUp" });
     tickN(server, 30);
-    tickN(server, 5);
+    tickN(server, COUNTDOWN_DURATION);
     server.disconnect(p2);
     const snap = first.last();
     expect(snap.phase).toBe("round");

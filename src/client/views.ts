@@ -133,8 +133,7 @@ export function hideResults(): void {
 export function renderCountdown(app: HTMLElement, snap: Snapshot, myId: string | null): void {
   app.replaceChildren(
     el("h1", {}, "TYPE RUSH"),
-    el("h2", {}, "Los in…"),
-    el("div", { class: "timer", aria: { live: "assertive" } }, String(snap.timeRemaining)),
+    el("div", { class: "timer", aria: { live: "assertive" } }, snap.countdownWord ?? ""),
     playerList(snap, myId),
     ...(snap.spectators.length > 0 ? [spectatorStat(snap.spectators.length)] : []),
   );

@@ -38,6 +38,7 @@ function resultsLobby(roundNumber = 2): Snapshot {
     ],
     text: "",
     timeRemaining: 17,
+    countdownWord: null,
     winnerId: "p1",
     roundNumber,
   };
